@@ -5,25 +5,7 @@ import (
 	"errors"
 )
 
-const (
-	OpcodeContinuation = 0x0 // Continuation frame
-	OpcodeText         = 0x1 // Text frame (UTF-8)
-	OpcodeBinary       = 0x2 // Binary frame
-	OpcodeClose        = 0x8 // Connection close
-	OpcodePing         = 0x9 // Ping
-	OpcodePong         = 0xA // Pong
-)
-
-type Frame struct {
-	FIN           bool
-	OPCODE        uint8
-	PayloadLength int
-	IsMasked      bool
-	MaskingKey    []byte
-	Payload       []byte
-}
-
-func ParseFrame(raw []byte) (Frame, error) {
+func ReadFrame(raw []byte) (Frame, error) {
 	var frame Frame
 
 	if len(raw) < 2 {

@@ -6,17 +6,19 @@ import (
 )
 
 type Manager struct {
-	Conns map[string]*Conn
-	Mu    sync.RWMutex
+	Conns     map[string]*Conn
+	Mu        sync.RWMutex
+	BroadCast chan []byte
 	Args
 }
 
 func NewManager(args *Args) *Manager {
 	args.WithDefault()
-	
+
 	m := &Manager{
-		Conns: make(map[string]*Conn),
-		Args:  *args,
+		Conns:     make(map[string]*Conn),
+		BroadCast: make(chan []byte, 256),
+		Args:      *args,
 	}
 
 	return m
