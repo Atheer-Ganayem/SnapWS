@@ -1,0 +1,3 @@
+- the current implemntation of the broadcast channel is wrong, it will only reach one go routine
+- Decide on the params and return value of the read methods in conn
+- 

@@ -11,9 +11,9 @@ const (
 	DefaultWriteBufferSize = 4096
 )
 
-type Args struct {
-	OnConnect    func(id string, conn *Conn)
-	OnDisconnect func(id string, conn *Conn)
+type Args[KeyType comparable] struct {
+	OnConnect    func(id KeyType, conn *Conn)
+	OnDisconnect func(id KeyType, conn *Conn)
 
 	// If not set it will default to 5 seconds.
 	WriteWait time.Duration
@@ -30,7 +30,7 @@ type Args struct {
 	WriteBufferSize int
 }
 
-func (args *Args) WithDefault() {
+func (args *Args[KeyType]) WithDefault() {
 	if args.WriteWait == 0 {
 		args.WriteWait = defaultWriteWait
 	}

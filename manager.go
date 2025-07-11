@@ -5,26 +5,28 @@ import (
 	"sync"
 )
 
-type Manager struct {
-	Conns     map[string]*Conn
-	Mu        sync.RWMutex
-	BroadCast chan []byte
-	Args
+type Manager[KeyType comparable] struct {
+	// Conns map keeps track of all active connections.
+	// Each connection must be keyed by a unique identifier, preferably the user id.
+	Conns map[KeyType]*Conn
+	Mu    sync.RWMutex
+	Args[KeyType]
 }
 
-func NewManager(args *Args) *Manager {
+// Creates a new manager. KeyType is the type of the key of the conns map.
+// KeyType must be comparable.
+func NewManager[KeyType comparable](args *Args[KeyType]) *Manager[KeyType] {
 	args.WithDefault()
 
-	m := &Manager{
-		Conns:     make(map[string]*Conn),
-		BroadCast: make(chan []byte, 256),
-		Args:      *args,
+	m := &Manager[KeyType]{
+		Conns: make(map[KeyType]*Conn),
+		Args:  *args,
 	}
 
 	return m
 }
 
-func (m *Manager) Connect(id string, w http.ResponseWriter, r *http.Request) (*Conn, error) {
+func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	err := handShake(w, r)
 	if err != nil {
 		return nil, err
@@ -40,24 +42,29 @@ func (m *Manager) Connect(id string, w http.ResponseWriter, r *http.Request) (*C
 		return nil, err
 	}
 
-	conn := NewConn(c)
-	m.Register(id, conn)
+	conn := m.NewConn(c)
+	m.Register(key, conn)
 	if m.OnConnect != nil {
-		m.OnConnect(id, conn)
+		m.OnConnect(key, conn)
 	}
 
+	go conn.listen()
 	// go ping pong ops
 
 	return conn, nil
 }
 
-func (m *Manager) Register(id string, conn *Conn) {
+func (m *Manager[KeyType]) Register(id KeyType, conn *Conn) {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	if conn, ok := m.Conns[id]; ok {
+		conn.raw.Close()
+	}
 	m.Conns[id] = conn
 }
 
-func (m *Manager) Unregister(id string) error {
+func (m *Manager[KeyType]) Unregister(id KeyType) error {
 	m.Mu.Lock()
 
 	conn, ok := m.Conns[id]
@@ -77,7 +84,7 @@ func (m *Manager) Unregister(id string) error {
 	return nil
 }
 
-func (m *Manager) GetConn(id string) (*Conn, bool) {
+func (m *Manager[KeyType]) GetConn(id KeyType) (*Conn, bool) {
 	m.Mu.RLock()
 	defer m.Mu.Unlock()
 
