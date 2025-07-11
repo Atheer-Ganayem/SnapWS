@@ -6,15 +6,20 @@ import (
 )
 
 type Manager struct {
-	Conns        map[string]*Conn
-	Mu           sync.RWMutex
-	OnDisconnect func(id string, conn *Conn)
+	Conns map[string]*Conn
+	Mu    sync.RWMutex
+	Args
 }
 
-func NewManager() *Manager {
-	return &Manager{
+func NewManager(args *Args) *Manager {
+	args.WithDefault()
+	
+	m := &Manager{
 		Conns: make(map[string]*Conn),
+		Args:  *args,
 	}
+
+	return m
 }
 
 func (m *Manager) Connect(id string, w http.ResponseWriter, r *http.Request) (*Conn, error) {
@@ -35,6 +40,11 @@ func (m *Manager) Connect(id string, w http.ResponseWriter, r *http.Request) (*C
 
 	conn := NewConn(c)
 	m.Register(id, conn)
+	if m.OnConnect != nil {
+		m.OnConnect(id, conn)
+	}
+
+	// go ping pong ops
 
 	return conn, nil
 }
