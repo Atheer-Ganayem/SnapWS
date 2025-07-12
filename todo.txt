@@ -1,7 +1,5 @@
-- i now accept only 1 frame even if its not FIN, i should rename the accept method
-  to acceptFrame and have a method called accept to accept the full "message". 
+- the accept frame function looks ugly
 - TESTS AND COMMENTS
 - maybe add an atomic counter for conns len
 - add middlewres
 - maybe add rate limiting
-- add a Metadata map[string]interface{} to the conn, so the user can store anything they wish with the conn

@@ -8,6 +8,20 @@ import (
 )
 
 const (
+	CloseNormalClosure           uint16 = 1000
+	CloseGoingAway               uint16 = 1001
+	CloseProtocolError           uint16 = 1002
+	CloseUnsupportedData         uint16 = 1003
+	CloseNoStatusReceived        uint16 = 1005
+	CloseAbnormalClosure         uint16 = 1006
+	CloseInvalidFramePayloadData uint16 = 1007
+	ClosePolicyViolation         uint16 = 1008
+	CloseMessageTooBig           uint16 = 1009
+	CloseMandatoryExtension      uint16 = 1010
+	CloseInternalServerErr       uint16 = 1011
+)
+
+const (
 	OpcodeContinuation = 0x0 // Continuation frame
 	OpcodeText         = 0x1 // Text frame (UTF-8)
 	OpcodeBinary       = 0x2 // Binary frame
@@ -87,6 +101,18 @@ func IsCompleteFrame(raw []byte) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (frame *Frame) IsControl() bool {
+	return frame.OPCODE == OpcodeClose || frame.OPCODE == OpcodePing || frame.OPCODE == OpcodePong
+}
+
+func (frame *Frame) IsValidControl() bool {
+	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
+}
+
+func (frame *Frame) IsValidMessageFrame() bool {
+	return frame.OPCODE == OpcodeText || frame.OPCODE == OpcodeBinary || frame.OPCODE == OpcodeContinuation
 }
 
 func (frames FrameGroup) Payload() []byte {
