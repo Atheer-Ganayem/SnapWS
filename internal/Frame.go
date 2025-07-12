@@ -25,6 +25,8 @@ type Frame struct {
 	Payload       []byte
 }
 
+type FrameGroup []*Frame
+
 func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, error) {
 	frame := Frame{
 		FIN:        FIN,
@@ -85,4 +87,22 @@ func IsCompleteFrame(raw []byte) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (frames FrameGroup) Payload() []byte {
+	if len(frames) < 1 {
+		return nil
+	}
+
+	length := 0
+	for _, frame := range frames {
+		length += frame.PayloadLength
+	}
+
+	payload := make([]byte, 0, length)
+	for _, frame := range frames {
+		payload = append(payload, frame.Payload...)
+	}
+
+	return payload
 }

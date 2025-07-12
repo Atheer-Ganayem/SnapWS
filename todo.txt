@@ -1,6 +1,6 @@
+- i now accept only 1 frame even if its not FIN, i should rename the accept method
+  to acceptFrame and have a method called accept to accept the full "message". 
 - TESTS AND COMMENTS
-- the current implemntation of the broadcast channel is wrong, it will only reach one go routine
-- Decide on the params and return value of the read methods in conn
 - maybe add an atomic counter for conns len
 - add middlewres
 - maybe add rate limiting

@@ -16,6 +16,7 @@ func main() {
 			w.Write([]byte(err.Error()))
 			w.WriteHeader(http.StatusBadRequest)
 		}
+		defer manager.Unregister(r.RemoteAddr)
 
 		for {
 			msg, err := conn.ReadString()

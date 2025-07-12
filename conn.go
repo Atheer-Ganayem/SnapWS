@@ -48,9 +48,9 @@ func (conn *Conn) listen() {
 	}
 }
 
-// Accept reads and parses a single WebSocket frame.
+// AcceptFrame reads and parses a single WebSocket frame.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
-func (conn *Conn) Accept() (*internal.Frame, error) {
+func (conn *Conn) AcceptFrame() (*internal.Frame, error) {
 	data := make([]byte, 0, conn.readBufferSize)
 	buf := make([]byte, conn.readBufferSize)
 
@@ -106,45 +106,74 @@ func (conn *Conn) Accept() (*internal.Frame, error) {
 		if err != nil {
 			return nil, err
 		}
-		return conn.Accept()
+		return conn.AcceptFrame()
 
 	case internal.OpcodePong:
-		return conn.Accept()
+		return conn.AcceptFrame()
 	}
 
 	return &frame, nil
 }
 
+// This is the "true" accept method,
+func (conn *Conn) Accept() (internal.FrameGroup, error) {
+	frames := make(internal.FrameGroup, 0, 1)
+	frame, err := conn.AcceptFrame()
+	if err != nil {
+		return nil, err
+	}
+	frames = append(frames, frame)
+	if frame.FIN || (frame.OPCODE != internal.OpcodeBinary && frame.OPCODE != internal.OpcodeText) {
+		return frames, nil
+	}
+
+	for {
+		frame, err := conn.AcceptFrame()
+		if err != nil {
+			return nil, err
+		}
+		if frame.OPCODE != internal.OpcodeContinuation {
+			return nil, ErrInvalidFrameSeq
+		}
+		frames = append(frames, frame)
+		if frame.FIN {
+			break
+		}
+	}
+
+	return frames, nil
+}
+
 // Reads from conn and returns the payload of a single websocket frame.
 func (conn *Conn) ReadBytes() (data []byte, err error) {
-	frame, err := conn.Accept()
+	frames, err := conn.Accept()
 	if err != nil {
 		return nil, err
 	}
 
-	return frame.Payload, nil
+	return frames.Payload(), nil
 }
 
 func (conn *Conn) ReadString() (string, error) {
-	frame, err := conn.Accept()
+	frames, err := conn.Accept()
 	if err != nil {
 		return "", err
-	} else if !frame.IsText() {
+	} else if !frames[0].IsText() {
 		return "", ErrInvalidOPCODE
 	}
 
-	return string(frame.Payload), nil
+	return string(frames.Payload()), nil
 }
 
 func (conn *Conn) ReadJSON(v any) error {
-	frame, err := conn.Accept()
+	frames, err := conn.Accept()
 	if err != nil {
 		return err
-	} else if !frame.IsText() {
+	} else if !frames[0].IsText() {
 		return ErrInvalidOPCODE
 	}
 
-	return json.Unmarshal(frame.Payload, v)
+	return json.Unmarshal(frames.Payload(), v)
 }
 
 // Low level writing, not safe to use concurrently.

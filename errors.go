@@ -1,6 +1,8 @@
 package snapws
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	ErrWrongMethod             = errors.New("Wrong method, the request method must be GET.")
@@ -16,4 +18,5 @@ var (
 	ErrConnNotFound            = errors.New("Can't unregister a non existing connection.")
 	ErrInvalidOPCODE           = errors.New("Invalid OPCODE.")
 	ErrTooLargePayload         = errors.New("Payload length too large.")
+	ErrInvalidFrameSeq         = errors.New("invalid frame sequence: expected continuation")
 )

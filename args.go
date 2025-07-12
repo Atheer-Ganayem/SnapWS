@@ -4,9 +4,8 @@ import "time"
 
 const (
 	defaultWriteWait       = time.Second * 5
-	defaultReadWait        = time.Second * 5
+	defaultReadWait        = time.Minute
 	defaultPingEvery       = time.Second * 50
-	DefaultPongWait        = time.Minute
 	DefaultReadBufferSize  = 4096
 	DefaultWriteBufferSize = 4096
 )
