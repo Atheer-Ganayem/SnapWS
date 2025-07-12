@@ -12,8 +12,8 @@ var (
 	ErrInvalidVersionHeader    = errors.New("Invalid version header.")
 	ErrMissingSecKey           = errors.New("Mssing Sec-WebSocket-Key header.")
 	ErrInvalidSecKey           = errors.New("Invalid Sec-WebSocket-Key header.")
-
-	ErrHijackerNotSupported = errors.New("Connection doesnt support hijacking.")
-
-	ErrConnNotFound = errors.New("Can't unregister a non existing connection.")
+	ErrHijackerNotSupported    = errors.New("Connection doesnt support hijacking.")
+	ErrConnNotFound            = errors.New("Can't unregister a non existing connection.")
+	ErrInvalidOPCODE           = errors.New("Invalid OPCODE.")
+	ErrTooLargePayload         = errors.New("Payload length too large.")
 )

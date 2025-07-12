@@ -1,3 +1,7 @@
+- TESTS AND COMMENTS
 - the current implemntation of the broadcast channel is wrong, it will only reach one go routine
 - Decide on the params and return value of the read methods in conn
-- 
+- maybe add an atomic counter for conns len
+- add middlewres
+- maybe add rate limiting
+- add a Metadata map[string]interface{} to the conn, so the user can store anything they wish with the conn

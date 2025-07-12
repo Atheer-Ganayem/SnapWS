@@ -16,6 +16,9 @@ type Manager[KeyType comparable] struct {
 // Creates a new manager. KeyType is the type of the key of the conns map.
 // KeyType must be comparable.
 func NewManager[KeyType comparable](args *Args[KeyType]) *Manager[KeyType] {
+	if args == nil {
+		args = &Args[KeyType]{}
+	}
 	args.WithDefault()
 
 	m := &Manager[KeyType]{
@@ -48,20 +51,22 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 		m.OnConnect(key, conn)
 	}
 
-	go conn.listen()
-	// go ping pong ops
+	go func() {
+		conn.listen()
+		m.Unregister(key)
+	}()
 
 	return conn, nil
 }
 
-func (m *Manager[KeyType]) Register(id KeyType, conn *Conn) {
+func (m *Manager[KeyType]) Register(key KeyType, conn *Conn) {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	if conn, ok := m.Conns[id]; ok {
+	if conn, ok := m.Conns[key]; ok {
 		conn.raw.Close()
 	}
-	m.Conns[id] = conn
+	m.Conns[key] = conn
 }
 
 func (m *Manager[KeyType]) Unregister(id KeyType) error {
@@ -84,11 +89,15 @@ func (m *Manager[KeyType]) Unregister(id KeyType) error {
 	return nil
 }
 
-func (m *Manager[KeyType]) GetConn(id KeyType) (*Conn, bool) {
+func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn, bool) {
 	m.Mu.RLock()
 	defer m.Mu.Unlock()
 
-	conn, ok := m.Conns[id]
+	conn, ok := m.Conns[key]
 
 	return conn, ok
 }
+
+// Broadcast sends a message to all active connections.
+// It returns "n" the number of successfull writes, and an error.
+// func (m *Manager[KeyType]) Broadcast() (n int, err error)
