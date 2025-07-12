@@ -51,9 +51,11 @@ func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, err
 	}
 	frame.PayloadLength = len(payload)
 
-	_, err := rand.Read(frame.MaskingKey)
-	if err != nil {
-		return frame, err
+	if IsMasked {
+		_, err := rand.Read(frame.MaskingKey)
+		if err != nil {
+			return frame, err
+		}
 	}
 
 	return frame, nil
@@ -62,6 +64,7 @@ func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, err
 func (frame *Frame) IsText() bool {
 	return frame.OPCODE == OpcodeText
 }
+
 func IsCompleteFrame(raw []byte) (bool, error) {
 	if len(raw) < 2 {
 		return false, nil

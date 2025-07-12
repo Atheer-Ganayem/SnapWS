@@ -1,3 +1,8 @@
+### important fix ###
+the endpoint SHOULD use the same status code (and MAY copy the reason)
+if it did not previously send a Close frame.
+### END ###
+
 - the accept frame function looks ugly
 - TESTS AND COMMENTS
 - maybe add an atomic counter for conns len
