@@ -35,27 +35,7 @@ func (conn *Conn[KeyType]) listen() {
 	}
 }
 
-// Low level writing, not safe to use concurrently.
-// Use SendString, SendJSON, SendBytes for safe writing.
-// func (conn *Conn) Write(b []byte) (n int, err error)
-
-// func (conn *Conn) SendString(str string) error
-// func (conn *Conn) SendJSON(val map[string]interface{}) error
-// func (conn *Conn) SendBytes(b []byte) error
-// func (conn *Conn) Ping() error
-
-func (conn *Conn[KeyType]) pong(payload []byte) {
-	frame := internal.Frame{
-		FIN:           true,
-		OPCODE:        internal.OpcodePong,
-		PayloadLength: len(payload),
-		Payload:       payload,
-	}
-
-	conn.send <- &frame
-}
-
-func (conn *Conn[KeyType]) Close(code uint16, reason string) {
+func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
 		buf := new(bytes.Buffer)
 		_ = binary.Write(buf, binary.BigEndian, code)
@@ -67,11 +47,30 @@ func (conn *Conn[KeyType]) Close(code uint16, reason string) {
 			select {
 			case conn.send <- &frame:
 			default:
-				// channel full, skip sending close frame
+				// channel full => skip sending close frame
 			}
 		}
 
 		close(conn.send)
 		conn.Manager.unregister(conn.Key)
 	})
+}
+
+func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
+	conn.closeOnce.Do(func() {
+		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
+		if err == nil {
+			select {
+			case conn.send <- &frame:
+			default:
+				// channel full => skip sending close frame
+			}
+		}
+		close(conn.send)
+		conn.Manager.unregister(conn.Key)
+	})
+}
+
+func (conn *Conn[KeyType]) Close() {
+	conn.closeWithCode(internal.CloseNormalClosure, "Normal close")
 }

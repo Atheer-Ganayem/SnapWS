@@ -85,15 +85,18 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 func (conn *Conn[KeyType]) accept() (internal.FrameGroup, error) {
 	frames := make(internal.FrameGroup, 0, 1)
 	frame, code, err := conn.acceptFrame()
-	if err != nil {
-		conn.Close(code, err.Error())
+	if code == internal.CloseNormalClosure {
+		conn.closeWithPayload(frame.Payload)
+		return nil, err
+	} else if err != nil {
+		conn.closeWithCode(code, err.Error())
 		return nil, err
 	}
 
 	frames = append(frames, frame)
 
 	if !frame.IsValidMessageFrame() {
-		conn.Close(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+		conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
 		return nil, ErrInvalidOPCODE
 	}
 	if frame.FIN {
@@ -104,18 +107,18 @@ func (conn *Conn[KeyType]) accept() (internal.FrameGroup, error) {
 	for {
 		frame, code, err := conn.acceptFrame()
 		if err != nil {
-			conn.Close(code, err.Error())
+			conn.closeWithCode(code, err.Error())
 			return nil, err
 		}
 		if frame.OPCODE != internal.OpcodeContinuation {
-			conn.Close(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
 			return nil, ErrInvalidOPCODE
 		}
 		frames = append(frames, frame)
 		totalSize += len(frame.Payload)
 
 		if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
-			conn.Close(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
+			conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
 			return nil, ErrMessageTooLarge
 		}
 		if frame.FIN {
