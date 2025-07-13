@@ -20,9 +20,9 @@ var (
 	ErrTooLargePayload         = errors.New("payload length too large")
 	ErrInvalidFrameSeq         = errors.New("invalid frame sequence: expected continuation")
 	ErrInvalidControlFrame     = errors.New("invalid control frame")
-	errNotMasked               = errors.New("received unmasked frame, all frames from the client must be masked.")
-	ErrMessageTooLarge         = errors.New("message received from client was too large.")
-	ErrInvalidUTF8             = errors.New("invalid utf8 data.")
+	errNotMasked               = errors.New("received unmasked frame, all frames from the client must be masked")
+	ErrMessageTooLarge         = errors.New("message received from client was too large")
+	ErrInvalidUTF8             = errors.New("invalid utf8 data")
 	// ErrMessageTypeMismatch is returned when the received WebSocket message type
 	// does not match the expected type (e.g., expecting text but received binary).
 	ErrMessageTypeMismatch = errors.New("websocket message type did not match expected type")
