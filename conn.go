@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
@@ -57,18 +58,25 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 }
 
 func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
-	conn.closeOnce.Do(func() {
-		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
-		if err == nil {
-			select {
-			case conn.send <- &frame:
-			default:
-				// channel full => skip sending close frame
-			}
+	if len(payload) < 2 {
+		conn.closeWithCode(internal.CloseProtocolError, "invalid close frame payload")
+		return
+	}
+	code := binary.BigEndian.Uint16(payload[:2])
+	if !internal.IsValidCloseCode(code) {
+		conn.closeWithCode(internal.CloseProtocolError, "invalid close code")
+		return
+	}
+
+	if len(payload) > 2 {
+		if !utf8.Valid(payload[2:]) {
+			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
+			return
 		}
-		close(conn.send)
-		conn.Manager.unregister(conn.Key)
-	})
+		conn.closeWithCode(code, string(payload[2:]))
+	} else {
+		conn.closeWithCode(code, "")
+	}
 }
 
 func (conn *Conn[KeyType]) Close() {

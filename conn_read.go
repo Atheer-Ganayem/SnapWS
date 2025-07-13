@@ -48,7 +48,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 				return nil, internal.CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
 			}
 		} else if err != nil {
-			return nil, internal.CloseAbnormalClosure, err
+			return nil, internal.CloseProtocolError, err
 		}
 	}
 

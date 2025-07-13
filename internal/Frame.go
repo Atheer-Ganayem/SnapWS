@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -13,14 +14,14 @@ const (
 	CloseGoingAway               uint16 = 1001
 	CloseProtocolError           uint16 = 1002
 	CloseUnsupportedData         uint16 = 1003
-	CloseNoStatusReceived        uint16 = 1005
-	CloseAbnormalClosure         uint16 = 1006
 	CloseInvalidFramePayloadData uint16 = 1007
 	ClosePolicyViolation         uint16 = 1008
 	CloseMessageTooBig           uint16 = 1009
 	CloseMandatoryExtension      uint16 = 1010
 	CloseInternalServerErr       uint16 = 1011
 )
+
+var allowedCodes = []uint16{1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011}
 
 const (
 	OpcodeContinuation = 0x0 // Continuation frame
@@ -143,4 +144,8 @@ func (frames FrameGroup) IsBinary() bool {
 
 func (frames FrameGroup) IsText() bool {
 	return frames[0].IsText()
+}
+
+func IsValidCloseCode(code uint16) bool {
+	return slices.Contains(allowedCodes, code)
 }

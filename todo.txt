@@ -1,6 +1,8 @@
-### important fix ###
-- accepting reserved frames. READ MORE ABOUT EXTENSTIONS
-### END ###
+### handshake ###
+- i shouldn't check if the sec key is of len 24, i should decode it then check if its 16 bytes  
+- i should split headers (comma split), then trim the element and lower then and check of equality
+  because only checking for "inclide" could cause some mistakes with other headers
+### end ###
 
 - the accept frame function looks ugly
 - TESTS AND COMMENTS
