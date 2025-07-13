@@ -136,3 +136,11 @@ func (frames FrameGroup) Payload() []byte {
 func (frames FrameGroup) IsValidUTF8() bool {
 	return utf8.Valid(frames.Payload())
 }
+
+func (frames FrameGroup) IsBinary() bool {
+	return frames[0].OPCODE == OpcodeBinary
+}
+
+func (frames FrameGroup) IsText() bool {
+	return frames[0].IsText()
+}

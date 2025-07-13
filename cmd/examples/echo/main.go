@@ -26,7 +26,7 @@ func main() {
 			w.WriteHeader(http.StatusBadRequest)
 		}
 		defer conn.Close()
-
+		
 		for {
 			msg, err := conn.ReadString()
 			if err != nil {

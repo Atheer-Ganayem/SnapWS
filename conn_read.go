@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
@@ -81,6 +80,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 }
 
 // This is the method used for accepting a full websocket message (text or binary).
+// This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
 func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	frames := make(internal.FrameGroup, 0, 1)
@@ -114,7 +114,7 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
 			return nil, ErrInvalidOPCODE
 		}
-		
+
 		totalSize += len(frame.Payload)
 		if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
 			conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
@@ -134,39 +134,55 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	return frames, nil
 }
 
-// Returns the payload as a slice of bytes.
-func (conn *Conn[KeyType]) ReadBytes() (data []byte, err error) {
+// ReadBinary returns the binary payload from a WebSocket binary message.
+//
+// If the received message is not of type binary, it returns snapws.ErrMessageTypeMismatch
+// without closing the connection. All other errors indicate a protocol or I/O failure,
+// and the connection will be closed automatically by acceptMessage.
+//
+// Note: This method returns the payload of a binary WebSocket message as a []byte slice.
+func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
 	frames, err := conn.acceptMessage()
 	if err != nil {
-		return nil, err
+		return nil, err // Connection already close by acceptMessage()
+	}
+	if !frames.IsBinary() {
+		return nil, ErrMessageTypeMismatch
 	}
 
 	return frames.Payload(), nil
 }
 
+// ReadString returns the message payload as a UTF-8 string from a text WebSocket message.
+//
+// If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
+// without closing the connection. All other errors indicate protocol or I/O issues,
+// and the connection will be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadString() (string, error) {
 	frames, err := conn.acceptMessage()
 	if err != nil {
-		return "", err
-	} else if !frames[0].IsText() {
-		return "", ErrInvalidOPCODE
-	}
-	if ok := utf8.Valid(frames.Payload()); !ok {
-		return "", ErrInvalidUTF8
+		return "", err // Connection already close by acceptMessage()
+	} else if !frames.IsText() {
+		return "", ErrMessageTypeMismatch
 	}
 
 	return string(frames.Payload()), nil
 }
 
+// ReadJSON reads a text WebSocket message and unmarshals its payload into the given value.
+//
+// This method expects the message to be of type text and contain valid UTF-8 encoded JSON.
+// If the message is not of type text, it returns snapws.ErrMessageTypeMismatch without
+// closing the connection.
+//
+// All other errors (such as protocol errors or connection issues) will cause the connection
+// to be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadJSON(v any) error {
 	frames, err := conn.acceptMessage()
 	if err != nil {
-		return err
-	} else if !frames[0].IsText() {
-		return ErrInvalidOPCODE
-	}
-	if ok := utf8.Valid(frames.Payload()); !ok {
-		return ErrInvalidUTF8
+		return err // Connection already close by acceptMessage()
+	} else if !frames.IsText() {
+		return ErrMessageTypeMismatch
 	}
 
 	return json.Unmarshal(frames.Payload(), v)
