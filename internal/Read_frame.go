@@ -15,6 +15,10 @@ func ReadFrame(raw []byte) (Frame, error) {
 	frame.FIN = raw[0]&0b10000000 != 0
 	frame.OPCODE = raw[0] & 0b00001111
 	frame.IsMasked = raw[1]&0b10000000 != 0
+	rsv := raw[0] & 0b01110000
+	if rsv != 0 {
+		return frame, errors.New("non-zero reserved bits set without negotiated extension")
+	}
 
 	offset, err := frame.parsePayloadLength(raw)
 	if err != nil {
