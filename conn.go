@@ -57,6 +57,10 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 	})
 }
 
+// Used to trigger closeWithCode with the code and reason parsed from payload.
+// The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
+// The rest of the payload is optional, represnting a UTF-8 reason.
+// Any violations would cause a close with internal.CloseProtocolError with the apropiate reason.
 func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
 	if len(payload) < 2 {
 		conn.closeWithCode(internal.CloseProtocolError, "invalid close frame payload")
@@ -79,6 +83,7 @@ func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
 	}
 }
 
+// Closes the conn normaly.
 func (conn *Conn[KeyType]) Close() {
 	conn.closeWithCode(internal.CloseNormalClosure, "Normal close")
 }

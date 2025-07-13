@@ -74,12 +74,10 @@ func validatedSecKeyHeader(r *http.Request) error {
 	header := r.Header.Get("Sec-WebSocket-Key")
 	if header == "" {
 		return ErrMissingSecKey
-	} else if len(header) != 24 {
-		return ErrInvalidSecKey
 	}
 
-	_, err := base64.StdEncoding.DecodeString(header)
-	if err != nil {
+	decoded, err := base64.StdEncoding.DecodeString(header)
+	if err != nil || len(decoded) != 16 {
 		return ErrInvalidSecKey
 	}
 
