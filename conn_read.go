@@ -114,13 +114,13 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
 			return nil, ErrInvalidOPCODE
 		}
-		frames = append(frames, frame)
+		
 		totalSize += len(frame.Payload)
-
 		if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
 			conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
 			return nil, ErrMessageTooLarge
 		}
+		frames = append(frames, frame)
 		if frame.FIN {
 			break
 		}
