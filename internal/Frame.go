@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"unicode/utf8"
 )
 
 const (
@@ -130,4 +131,8 @@ func (frames FrameGroup) Payload() []byte {
 	}
 
 	return payload
+}
+
+func (frames FrameGroup) IsValidUTF8() bool {
+	return utf8.Valid(frames.Payload())
 }

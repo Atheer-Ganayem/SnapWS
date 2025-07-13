@@ -1,6 +1,4 @@
 ### important fix ###
--- BUG: im not accepting the full frame if its a close from, im accessing payload on a nil pointer
-
 - Handling close in readString/json/bytes
 
 - consider validating utf-8 when receiving the frame, not in the readString\JSON

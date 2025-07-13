@@ -66,7 +66,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 		}
 		switch frame.OPCODE {
 		case internal.OpcodeClose:
-			return nil, internal.CloseNormalClosure, io.EOF
+			return &frame, internal.CloseNormalClosure, io.EOF
 
 		case internal.OpcodePing:
 			conn.pong(frame.Payload)
@@ -85,7 +85,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	frames := make(internal.FrameGroup, 0, 1)
 	frame, code, err := conn.acceptFrame()
-	if code == internal.CloseNormalClosure {
+	if code == internal.CloseNormalClosure && frame != nil {
 		conn.closeWithPayload(frame.Payload)
 		return nil, err
 	} else if err != nil {
@@ -124,6 +124,11 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 		if frame.FIN {
 			break
 		}
+	}
+
+	if frames[0].IsText() && !frames.IsValidUTF8() {
+		conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
+		return nil, ErrInvalidUTF8
 	}
 
 	return frames, nil
