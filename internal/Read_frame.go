@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"math"
 )
 
 func ReadFrame(raw []byte) (Frame, error) {
@@ -67,7 +69,11 @@ func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
 		if len(raw) < offset+8 {
 			return offset, errors.New("incomplete extended 64-bit length")
 		}
-		frame.PayloadLength = int(binary.BigEndian.Uint64(raw[offset : offset+8]))
+		length64 := binary.BigEndian.Uint64(raw[offset : offset+8])
+		if length64 > math.MaxInt32 {
+			return offset, fmt.Errorf("payload too large: %d", length64)
+		}
+		frame.PayloadLength = int(length64)
 		offset += 8
 	}
 

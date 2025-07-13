@@ -17,11 +17,6 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 	buf := make([]byte, conn.Manager.ReadBufferSize)
 
 	for {
-		err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
-		if err != nil {
-			return nil, internal.CloseInternalServerErr, err
-		}
-
 		n, err := conn.raw.Read(buf)
 		if n > 0 {
 			data = append(data, buf[:n]...)
@@ -83,6 +78,11 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 // This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
 func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
+	if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+		conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
+		return nil, err
+	}
+
 	frames := make(internal.FrameGroup, 0, 1)
 	frame, code, err := conn.acceptFrame()
 	if code == internal.CloseNormalClosure && frame != nil {

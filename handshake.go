@@ -39,31 +39,44 @@ func handShake(w http.ResponseWriter, r *http.Request) error {
 }
 
 func validateConnectionHeader(r *http.Request) error {
-	header := r.Header.Get("Connection")
-	if header == "" {
+	rawHeader := r.Header.Get("Connection")
+	if rawHeader == "" {
 		return ErrMissingConnectionHeader
-	} else if !strings.Contains(strings.ToLower(header), "upgrade") {
-		return ErrInvalidConnectionHeader
+	}
+	rawHeader = strings.ToLower(strings.TrimSpace(rawHeader))
+	iter := strings.SplitSeq(rawHeader, ",")
+
+	for header := range iter {
+		if strings.TrimSpace(header) == "upgrade" {
+			return nil
+		}
 	}
 
-	return nil
+	return ErrInvalidConnectionHeader
 }
 
 func validateUpgradeHeader(r *http.Request) error {
-	header := r.Header.Get("Upgrade")
-	if header == "" {
+	rawHeader := r.Header.Get("Upgrade")
+	if rawHeader == "" {
 		return ErrMissingUpgradeHeader
-	} else if !strings.EqualFold(header, "websocket") {
-		return ErrInvalidUpgradeHeader
+	}
+	rawHeader = strings.ToLower(strings.TrimSpace(rawHeader))
+	iter := strings.SplitSeq(rawHeader, ",")
+
+	for header := range iter {
+		if strings.TrimSpace(header) == "websocket" {
+			return nil
+		}
 	}
 
-	return nil
+	return ErrInvalidUpgradeHeader
 }
+
 func validateVersionHeader(r *http.Request) error {
 	header := r.Header.Get("Sec-WebSocket-Version")
 	if header == "" {
 		return ErrMissingVersionHeader
-	} else if header != "13" {
+	} else if strings.TrimSpace(header) != "13" {
 		return ErrInvalidVersionHeader
 	}
 
@@ -72,6 +85,7 @@ func validateVersionHeader(r *http.Request) error {
 
 func validatedSecKeyHeader(r *http.Request) error {
 	header := r.Header.Get("Sec-WebSocket-Key")
+	header = strings.TrimSpace(header)
 	if header == "" {
 		return ErrMissingSecKey
 	}

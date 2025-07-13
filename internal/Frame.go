@@ -139,10 +139,16 @@ func (frames FrameGroup) IsValidUTF8() bool {
 }
 
 func (frames FrameGroup) IsBinary() bool {
+	if len(frames) == 0 {
+		return false
+	}
 	return frames[0].OPCODE == OpcodeBinary
 }
 
 func (frames FrameGroup) IsText() bool {
+	if len(frames) == 0 {
+		return false
+	}
 	return frames[0].IsText()
 }
 
