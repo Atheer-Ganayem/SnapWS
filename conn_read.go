@@ -81,8 +81,8 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 }
 
 // This is the method used for accepting a full websocket message (text or binary).
-// Control frames will be handled automatically, they wont be returned.
-func (conn *Conn[KeyType]) accept() (internal.FrameGroup, error) {
+// Control frames will be handled automatically by the accetFrame method, they wont be returned.
+func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	frames := make(internal.FrameGroup, 0, 1)
 	frame, code, err := conn.acceptFrame()
 	if code == internal.CloseNormalClosure {
@@ -95,7 +95,7 @@ func (conn *Conn[KeyType]) accept() (internal.FrameGroup, error) {
 
 	frames = append(frames, frame)
 
-	if !frame.IsValidMessageFrame() {
+	if frame.OPCODE != internal.OpcodeText && frame.OPCODE != internal.OpcodeBinary {
 		conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
 		return nil, ErrInvalidOPCODE
 	}
@@ -131,7 +131,7 @@ func (conn *Conn[KeyType]) accept() (internal.FrameGroup, error) {
 
 // Returns the payload as a slice of bytes.
 func (conn *Conn[KeyType]) ReadBytes() (data []byte, err error) {
-	frames, err := conn.accept()
+	frames, err := conn.acceptMessage()
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (conn *Conn[KeyType]) ReadBytes() (data []byte, err error) {
 }
 
 func (conn *Conn[KeyType]) ReadString() (string, error) {
-	frames, err := conn.accept()
+	frames, err := conn.acceptMessage()
 	if err != nil {
 		return "", err
 	} else if !frames[0].IsText() {
@@ -154,7 +154,7 @@ func (conn *Conn[KeyType]) ReadString() (string, error) {
 }
 
 func (conn *Conn[KeyType]) ReadJSON(v any) error {
-	frames, err := conn.accept()
+	frames, err := conn.acceptMessage()
 	if err != nil {
 		return err
 	} else if !frames[0].IsText() {

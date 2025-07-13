@@ -114,10 +114,6 @@ func (frame *Frame) IsValidControl() bool {
 	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
 }
 
-func (frame *Frame) IsValidMessageFrame() bool {
-	return frame.OPCODE == OpcodeText || frame.OPCODE == OpcodeBinary || frame.OPCODE == OpcodeContinuation
-}
-
 func (frames FrameGroup) Payload() []byte {
 	if len(frames) < 1 {
 		return nil
