@@ -30,6 +30,19 @@ type Args[KeyType comparable] struct {
 	ReadBufferSize int
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
+
+	// subProtocols defines the list of supported WebSocket sub-protocols by the server.
+	// During the handshake, the server will select the first matching protocol from the
+	// client's Sec-WebSocket-Protocol header, based on the client's order of preference.
+	// If no match is found, the behavior depends on the value of rejectRaw.
+	SubProtocols []string
+	// rejectRaw determines whether to reject clients that do not propose any matching
+	// sub-protocols. If set to true, the connection will be rejected when:
+	//   - The client does not include any Sec-WebSocket-Protocol header,
+	//   - Or none of the client's protocols match the supported subProtocols list.
+	//
+	// If false, such connections will be accepted as raw WebSocket connections.
+	RejectRaw bool
 }
 
 func (args *Args[KeyType]) WithDefault() {

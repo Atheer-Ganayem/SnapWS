@@ -30,7 +30,7 @@ func NewManager[KeyType comparable](args *Args[KeyType]) *Manager[KeyType] {
 }
 
 func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*Conn[KeyType], error) {
-	err := handShake(w, r)
+	subProtocol, err := handShake(w, r, m.SubProtocols, m.RejectRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 		return nil, err
 	}
 
-	conn := m.newConn(c, key)
+	conn := m.newConn(c, key, subProtocol)
 	m.Register(key, conn)
 	if m.OnConnect != nil {
 		m.OnConnect(key, conn)

@@ -25,5 +25,6 @@ var (
 	ErrInvalidUTF8             = errors.New("invalid utf8 data")
 	// ErrMessageTypeMismatch is returned when the received WebSocket message type
 	// does not match the expected type (e.g., expecting text but received binary).
-	ErrMessageTypeMismatch = errors.New("websocket message type did not match expected type")
+	ErrMessageTypeMismatch      = errors.New("websocket message type did not match expected type")
+	ErrNotSupportedSubProtocols = errors.New("unsupported Sec-WebSocket-Protocol")
 )

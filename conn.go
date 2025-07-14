@@ -18,14 +18,17 @@ type Conn[KeyType comparable] struct {
 	Key       KeyType
 	MetaData  sync.Map
 	closeOnce sync.Once
+	// Empty string means its a raw websocket
+	SubProtocol string
 }
 
-func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType) *Conn[KeyType] {
+func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
 	return &Conn[KeyType]{
-		raw:     c,
-		send:    make(chan *internal.Frame, 256),
-		Manager: m,
-		Key:     key,
+		raw:         c,
+		send:        make(chan *internal.Frame, 256),
+		Manager:     m,
+		Key:         key,
+		SubProtocol: subProtocol,
 	}
 }
 
