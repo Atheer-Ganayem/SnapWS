@@ -1,3 +1,8 @@
+### improtat ###
+
+- remove send chan, add messageChan, frameChan, and controlChan
+
+####
 
 - the liten channle should accept frameGroup not single frame
 - the accept frame function looks ugly
