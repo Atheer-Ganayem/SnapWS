@@ -1,6 +1,7 @@
 package snapws
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,30 +11,27 @@ import (
 )
 
 // acceptFrame reads and parses a single WebSocket frame.
-// Returs a websocket frame, uint16 representing close reason (if error), and an error.
+// Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
 func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
-	data := make([]byte, 0, conn.Manager.ReadBufferSize)
 	buf := make([]byte, conn.Manager.ReadBufferSize)
+	var data bytes.Buffer
 
 	for {
 		n, err := conn.raw.Read(buf)
 		if n > 0 {
-			data = append(data, buf[:n]...)
+			data.Write(buf[:n])
 		}
 
 		if err == nil {
-			ok, err := internal.IsCompleteFrame(data)
+			ok, err := internal.IsCompleteFrame(data.Bytes())
 			if err != nil {
 				return nil, internal.CloseProtocolError, err
 			} else if ok {
 				break
 			}
-			continue
-		}
-
-		if err == io.EOF {
-			ok, err := internal.IsCompleteFrame(data)
+		} else if err == io.EOF {
+			ok, err := internal.IsCompleteFrame(data.Bytes())
 			if err != nil {
 				return nil, internal.CloseProtocolError, err
 			}
@@ -42,16 +40,16 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 			} else {
 				return nil, internal.CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
 			}
-		} else if err != nil {
+		} else {
 			return nil, internal.CloseProtocolError, err
 		}
 	}
 
-	frame, err := internal.ReadFrame(data)
+	frame, err := internal.ReadFrame(data.Bytes())
 	if err != nil {
 		return nil, internal.CloseProtocolError, err
 	} else if !frame.IsMasked {
-		return nil, internal.CloseProtocolError, errNotMasked
+		return nil, internal.CloseProtocolError, errExpectedMaskedFrame
 	}
 
 	if frame.IsControl() {
