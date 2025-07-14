@@ -51,10 +51,8 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 		m.OnConnect(key, conn)
 	}
 
-	go func() {
-		conn.listen()
-		m.unregister(key)
-	}()
+	go conn.frameListener()
+	go conn.messageListener()
 
 	return conn, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -15,8 +16,6 @@ func main() {
 	}
 	manager.OnDisconnect = func(id string, conn *snapws.Conn[string]) {
 		fmt.Printf("User %s has been disconnected\n", id)
-		time.Sleep(time.Millisecond)
-		fmt.Println(manager.Conns)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +33,15 @@ func main() {
 				return
 			}
 
-			fmt.Println(msg)
+			if msg != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				defer cancel()
+
+				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
 		}
 	})
 	fmt.Println("Server listenning")

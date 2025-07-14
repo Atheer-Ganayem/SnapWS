@@ -61,7 +61,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 			return &frame, internal.CloseNormalClosure, io.EOF
 
 		case internal.OpcodePing:
-			conn.pong(frame.Payload)
+			conn.Pong(frame.Payload)
 			return conn.acceptFrame()
 
 		case internal.OpcodePong:
@@ -158,6 +158,7 @@ func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
 // and the connection will be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadString() (string, error) {
 	frames, err := conn.acceptMessage()
+	fmt.Println(len(frames))
 	if err != nil {
 		return "", err // Connection already close by acceptMessage()
 	} else if !frames.IsText() {

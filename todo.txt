@@ -1,12 +1,10 @@
 ### improtat ###
 
-- remove send chan, add messageChan, frameChan, and controlChan
+- i was doing the ctx, i reached messageListener, didn't finish it,
+  i have to finish it and move down to lower funcs to do their ctx
 
 ####
 
-- the liten channle should accept frameGroup not single frame
-- the accept frame function looks ugly
-- TESTS AND COMMENTS
+- TESTS
 - maybe add an atomic counter for conns len
 - add middlewres
-- maybe add rate limiting

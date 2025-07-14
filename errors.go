@@ -27,4 +27,5 @@ var (
 	// does not match the expected type (e.g., expecting text but received binary).
 	ErrMessageTypeMismatch      = errors.New("websocket message type did not match expected type")
 	ErrNotSupportedSubProtocols = errors.New("unsupported Sec-WebSocket-Protocol")
+	ErrChannelClosed            = errors.New("channel is closed")
 )

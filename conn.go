@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -12,8 +13,15 @@ import (
 )
 
 type Conn[KeyType comparable] struct {
-	raw       net.Conn
-	send      chan *internal.Frame
+	raw net.Conn
+
+	// used for sending a internal.FrameGroup, text or binary only.
+	message chan *SendMessageRequest
+	// used for sending a single frame from the internal.FrameGroup receive by the mesage channel.
+	frame chan *SendFrameRequest
+	// used for sending control frames.
+	control chan *SendFrameRequest
+
 	Manager   *Manager[KeyType]
 	Key       KeyType
 	MetaData  sync.Map
@@ -25,17 +33,108 @@ type Conn[KeyType comparable] struct {
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
 	return &Conn[KeyType]{
 		raw:         c,
-		send:        make(chan *internal.Frame, 256),
+		message:     make(chan *SendMessageRequest, 8),
+		frame:       make(chan *SendFrameRequest, 32),
+		control:     make(chan *SendFrameRequest, 4),
 		Manager:     m,
 		Key:         key,
 		SubProtocol: subProtocol,
 	}
 }
 
-func (conn *Conn[KeyType]) listen() {
-	for frame := range conn.send {
-		fmt.Printf("Receive %d byte from send channel\n", frame.PayloadLength)
-		// sending logic later
+func (conn *Conn[KeyType]) frameListener() {
+	for {
+		var err error
+		select {
+		case req, ok := <-conn.control:
+			fmt.Println("received control frame")
+			if !ok {
+				if req != nil && req.errCh != nil {
+					req.errCh <- ErrChannelClosed
+				}
+				return
+			}
+			if req.ctx != nil && req.ctx.Err() != nil {
+				if req.errCh != nil {
+					req.errCh <- req.ctx.Err()
+				}
+				continue
+			}
+			err = conn.sendFrame(req.frame)
+			if req.errCh != nil {
+				req.errCh <- err
+			}
+
+		case req, ok := <-conn.frame:
+			if !ok {
+				if req != nil && req.errCh != nil {
+					req.errCh <- ErrChannelClosed
+				}
+				return
+			}
+			if req.ctx != nil && req.ctx.Err() != nil {
+				if req.errCh != nil {
+					req.errCh <- req.ctx.Err()
+				}
+				continue
+			}
+			err = conn.sendFrame(req.frame)
+			if req.errCh != nil {
+				req.errCh <- err
+			}
+		}
+	}
+}
+
+func (conn *Conn[KeyType]) messageListener() {
+	for req := range conn.message {
+		ctx := req.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		if ctx.Err() != nil {
+			if req.errCh != nil {
+				req.errCh <- ctx.Err()
+				close(req.errCh)
+			}
+			continue
+		}
+
+		var err error
+		for _, frame := range *req.frames {
+			errCh := make(chan error)
+			freq := &SendFrameRequest{
+				frame: frame,
+				errCh: errCh,
+				ctx:   ctx,
+			}
+
+			// Send the frame
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				break
+			case conn.frame <- freq:
+			}
+
+			// Wait for write result
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case err = <-errCh:
+			}
+
+			close(errCh)
+
+			if err != nil {
+				break
+			}
+		}
+
+		if req.errCh != nil {
+			req.errCh <- err
+		}
 	}
 }
 
@@ -49,13 +148,18 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
 		if err == nil {
 			select {
-			case conn.send <- &frame:
+			case conn.control <- &SendFrameRequest{
+				frame: &frame,
+				errCh: nil,
+			}:
 			default:
 				// channel full => skip sending close frame
 			}
 		}
 
-		close(conn.send)
+		close(conn.frame)
+		close(conn.message)
+		close(conn.control)
 		conn.Manager.unregister(conn.Key)
 	})
 }

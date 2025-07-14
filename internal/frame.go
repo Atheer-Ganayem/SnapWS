@@ -155,3 +155,40 @@ func (frames FrameGroup) IsText() bool {
 func IsValidCloseCode(code uint16) bool {
 	return slices.Contains(allowedCodes, code)
 }
+
+func (frame Frame) SplitIntoGroup(maxSize int) (*FrameGroup, error) {
+	if maxSize <= 0 {
+		return nil, fmt.Errorf("maxSize must be positive")
+	}
+
+	numOfFrames := frame.PayloadLength / maxSize
+	if frame.PayloadLength%maxSize > 0 {
+		numOfFrames++
+	}
+
+	fmt.Println(numOfFrames)
+	if numOfFrames == 1 {
+		f, err := NewFrame(true, frame.OPCODE, false, frame.Payload)
+		return &FrameGroup{&f}, err
+	}
+
+	frames := make([]*Frame, 0, numOfFrames)
+	for i := range numOfFrames {
+		var err error
+		var f Frame
+		if i == 0 {
+			f, err = NewFrame(numOfFrames == 1, frame.OPCODE, false, frame.Payload[:maxSize])
+		} else if i == numOfFrames-1 {
+			f, err = NewFrame(true, OpcodeContinuation, false, frame.Payload[maxSize*i:])
+		} else {
+			f, err = NewFrame(false, OpcodeContinuation, false, frame.Payload[maxSize*i:maxSize*(i+1)])
+		}
+		if err != nil {
+			return nil, err
+		}
+		frames = append(frames, &f)
+	}
+
+	fg := FrameGroup(frames)
+	return &fg, nil
+}

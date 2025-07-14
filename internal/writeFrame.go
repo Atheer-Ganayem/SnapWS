@@ -25,7 +25,7 @@ func (f *Frame) CalcLength() int {
 }
 
 func (f *Frame) Bytes() []byte {
-	b := make([]byte, 0, f.CalcLength())
+	b := make([]byte, 2, f.CalcLength())
 
 	b[0] = f.OPCODE
 	if f.FIN {
