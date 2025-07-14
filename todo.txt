@@ -1,3 +1,25 @@
+### Sub-protocols
+- Add `Subprotocols []string` in the Manager
+- Add `RejectRaw bool` in the Manager (default is **false**)
+- Scenarios:
+
+  1. The client **doesn't include** sub-protocols:
+     - If `RejectRaw == false` → ✅ accept (raw WebSocket)
+     - If `RejectRaw == true`  → ❌ reject
+
+  2. The client **includes sub-protocols**, but the server only accepts raw (i.e., `Subprotocols == nil` or empty):
+     - If `RejectRaw == false` → ✅ accept without sending `Sec-WebSocket-Protocol` header
+     - If `RejectRaw == true`  → ❌ reject
+
+  3. The client **includes sub-protocols**, and the server supports some:
+     - Server picks the **first match from client's list**
+     - Sends the `Sec-WebSocket-Protocol` header with the selected one
+     - If **no match is found**:
+       - If `RejectRaw == false` → ✅ accept without protocol header
+       - If `RejectRaw == true`  → ❌ reject
+###
+
+- the liten channle should accept frameGroup not single frame
 - the accept frame function looks ugly
 - TESTS AND COMMENTS
 - maybe add an atomic counter for conns len
