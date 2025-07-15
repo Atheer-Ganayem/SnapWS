@@ -1,7 +1,6 @@
 ### test deal lines
 
 - data.Write(buf[:n]) // there is an error an n i forgot about
-- Pong() may deadlock, it needs a ctx, maybe also close
 
 - TESTS
 - maybe add an atomic counter for conns len

@@ -30,7 +30,7 @@ func main() {
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.
 		defer conn.Close()
 
-		time.Sleep(time.Second*5)
+		time.Sleep(time.Second * 15)
 
 		// for {
 		// 	msg, err := conn.ReadString()

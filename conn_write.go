@@ -175,12 +175,33 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 }
 
 func (conn *Conn[KeyType]) Pong(payload []byte) {
-	frame, err := internal.NewFrame(true, internal.OpcodePong, false, payload)
+	if conn.isClosed.Load() {
+		return
+	}
 
-	if err == nil && !conn.isClosed.Load() {
-		conn.control <- &SendFrameRequest{
-			frame: &frame,
-			errCh: nil,
+	frame, err := internal.NewFrame(true, internal.OpcodePong, false, payload)
+	if err != nil {
+		conn.closeWithCode(internal.CloseInternalServerErr, "faild to create pong frame")
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), conn.Manager.WriteWait)
+	defer cancel()
+	errCh := make(chan error)
+
+	select {
+	case <-ctx.Done():
+		conn.closeWithCode(internal.ClosePolicyViolation, "pong enqueue timeout")
+		return
+	case conn.control <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: ctx}:
+	}
+
+	select {
+	case <-ctx.Done():
+		conn.closeWithCode(internal.ClosePolicyViolation, "pong enqueue timeout")
+		return
+	case err = <-errCh:
+		if err != nil {
+			conn.closeWithCode(internal.ClosePolicyViolation, "pong failed: "+err.Error())
 		}
 	}
 }

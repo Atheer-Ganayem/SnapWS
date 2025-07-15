@@ -40,7 +40,10 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 			return nil, internal.CloseMessageTooBig, ErrMessageTooLarge
 		}
 		if n > 0 {
-			data.Write(buf[:n]) // there is an error an n i forgot about
+			_, err = data.Write(buf[:n])
+			if err != nil {
+				return nil, internal.CloseInternalServerErr, err
+			}
 		}
 
 		ok, fErr := internal.IsCompleteFrame(data.Bytes())
