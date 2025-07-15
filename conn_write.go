@@ -21,9 +21,21 @@ type SendFrameRequest struct {
 	ctx   context.Context
 }
 
+func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
+	if req.ctx != nil && req.ctx.Err() != nil {
+		if req.errCh != nil {
+			req.errCh <- req.ctx.Err()
+		}
+	}
+	err := conn.write(req.frame)
+	if req.errCh != nil {
+		req.errCh <- err
+	}
+}
+
 // Low level writing, not safe to use concurrently.
 // Use SendString, SendJSON, SendBytes for safe writing.
-func (conn *Conn[KeyType]) sendFrame(frame *internal.Frame) (err error) {
+func (conn *Conn[KeyType]) write(frame *internal.Frame) (err error) {
 	err = conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
 		return err
@@ -51,22 +63,21 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 		errCh:  errCh,
 		ctx:    ctx,
 	}
-	defer close(errCh)
 
 	if conn.isClosed.Load() {
 		return errConnClosed
 	}
 	select {
-	case conn.message <- req:
 	case <-ctx.Done():
 		return ctx.Err()
+	case conn.message <- req:
 	}
 
 	select {
-	case err := <-errCh:
-		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	case err := <-errCh:
+		return err
 	}
 }
 

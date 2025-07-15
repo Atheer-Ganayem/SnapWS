@@ -1,3 +1,17 @@
+#### IDEA ####
+
+- i should always read from the connection, so i listen to control frames.
+  right now im only listening to anything (control frames or not), only if the
+  user calls any of my read messages. However, i should always listen for incoming messages.
+  a way of implementing this, is firstly to make a listener go routine, and to have an
+  inbound buffered channel, where i send to it only non-control frames, i send them in a form 
+  of frame-group.
+  when the user calls any of the public api methods, i should read from the ibnound in return to him.
+  if there is a type mismatch, i must return it.
+
+#### END #####
+
+
 - TESTS
 - maybe add an atomic counter for conns len
 - add middlewres

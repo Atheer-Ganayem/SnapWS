@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -42,7 +43,7 @@ func main() {
 			}
 
 			if msg != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*time.Duration(rand.Intn(1000)))
 				defer cancel()
 
 				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))

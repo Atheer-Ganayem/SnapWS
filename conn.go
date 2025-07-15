@@ -49,7 +49,6 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 
 func (conn *Conn[KeyType]) frameListener() {
 	for {
-		var err error
 		select {
 		case req, ok := <-conn.control:
 			if !ok {
@@ -58,16 +57,7 @@ func (conn *Conn[KeyType]) frameListener() {
 				}
 				return
 			}
-			if req.ctx != nil && req.ctx.Err() != nil {
-				if req.errCh != nil {
-					req.errCh <- req.ctx.Err()
-				}
-				continue
-			}
-			err = conn.sendFrame(req.frame)
-			if req.errCh != nil {
-				req.errCh <- err
-			}
+			conn.sendFrame(req)
 
 		case req, ok := <-conn.frame:
 			if !ok {
@@ -76,16 +66,7 @@ func (conn *Conn[KeyType]) frameListener() {
 				}
 				return
 			}
-			if req.ctx != nil && req.ctx.Err() != nil {
-				if req.errCh != nil {
-					req.errCh <- req.ctx.Err()
-				}
-				continue
-			}
-			err = conn.sendFrame(req.frame)
-			if req.errCh != nil {
-				req.errCh <- err
-			}
+			conn.sendFrame(req)
 		}
 	}
 }
