@@ -10,6 +10,8 @@ import (
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
+
+
 func main() {
 	manager := snapws.NewManager(&snapws.Args[string]{
 		PingEvery: time.Second * 5,

@@ -76,6 +76,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 // This is the method used for accepting a full websocket message (text or binary).
 // This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
+// the length of returned frames group is always >= 1.
 func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
 		conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
@@ -133,6 +134,21 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 	return frames, nil
 }
 
+// ReadBinary returns the payload from a WebSocket message (binary or text).
+// If the receive message was binary, msgType would be equal to internal.OpcodeBinary,
+// if the receive message was binary, msgType would be equal to internal.OpcodeText.
+//
+// All errors indicate a protocol or I/O failure, and the connection will be
+// closed automatically by acceptMessage, andthe msgType would be -1.
+func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
+	frames, err := conn.acceptMessage()
+	if err != nil {
+		return -1, nil, err // Connection already close by acceptMessage()
+	}
+
+	return int8(frames[0].OPCODE), frames.Payload(), nil
+}
+
 // ReadBinary returns the binary payload from a WebSocket binary message.
 //
 // If the received message is not of type binary, it returns snapws.ErrMessageTypeMismatch
@@ -141,15 +157,14 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 //
 // Note: This method returns the payload of a binary WebSocket message as a []byte slice.
 func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
-	frames, err := conn.acceptMessage()
+	msgType, payload, err := conn.Read()
 	if err != nil {
-		return nil, err // Connection already close by acceptMessage()
-	}
-	if !frames.IsBinary() {
+		return nil, err
+	} else if msgType != internal.OpcodeBinary {
 		return nil, ErrMessageTypeMismatch
 	}
 
-	return frames.Payload(), nil
+	return payload, nil
 }
 
 // ReadString returns the message payload as a UTF-8 string from a text WebSocket message.
@@ -158,14 +173,14 @@ func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
 // without closing the connection. All other errors indicate protocol or I/O issues,
 // and the connection will be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadString() (string, error) {
-	frames, err := conn.acceptMessage()
+	msgType, payload, err := conn.Read()
 	if err != nil {
 		return "", err // Connection already close by acceptMessage()
-	} else if !frames.IsText() {
+	} else if msgType != internal.OpcodeText {
 		return "", ErrMessageTypeMismatch
 	}
 
-	return string(frames.Payload()), nil
+	return string(payload), nil
 }
 
 // ReadJSON reads a text WebSocket message and unmarshals its payload into the given value.
@@ -177,12 +192,12 @@ func (conn *Conn[KeyType]) ReadString() (string, error) {
 // All other errors (such as protocol errors or connection issues) will cause the connection
 // to be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadJSON(v any) error {
-	frames, err := conn.acceptMessage()
+	msgType, payload, err := conn.Read()
 	if err != nil {
 		return err // Connection already close by acceptMessage()
-	} else if !frames.IsText() {
+	} else if msgType != internal.OpcodeText {
 		return ErrMessageTypeMismatch
 	}
 
-	return json.Unmarshal(frames.Payload(), v)
+	return json.Unmarshal(payload, v)
 }
