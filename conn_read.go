@@ -2,7 +2,6 @@ package snapws
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -191,13 +190,13 @@ func (conn *Conn[KeyType]) ReadString() (string, error) {
 //
 // All other errors (such as protocol errors or connection issues) will cause the connection
 // to be closed automatically by acceptMessage.
-func (conn *Conn[KeyType]) ReadJSON(v any) error {
-	msgType, payload, err := conn.Read()
-	if err != nil {
-		return err // Connection already close by acceptMessage()
-	} else if msgType != internal.OpcodeText {
-		return ErrMessageTypeMismatch
-	}
+// func (conn *Conn[KeyType]) ReadJSON(v any) error {
+// 	msgType, payload, err := conn.Read()
+// 	if err != nil {
+// 		return err // Connection already close by acceptMessage()
+// 	} else if msgType != internal.OpcodeText {
+// 		return ErrMessageTypeMismatch
+// 	}
 
-	return json.Unmarshal(payload, v)
-}
+// 	return json.Unmarshal(payload, v)
+// }
