@@ -3,14 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"time"
 
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
-
-
 
 func main() {
 	manager := snapws.NewManager(&snapws.Args[string]{
@@ -45,7 +42,7 @@ func main() {
 			}
 
 			if msg != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*time.Duration(rand.Intn(1000)))
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 
 				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))

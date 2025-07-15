@@ -5,6 +5,7 @@ import (
 )
 
 var (
+	ErrTest                    = errors.New("this is just an error for testing")
 	ErrWrongMethod             = errors.New("wrong method, the request method must be GET")
 	ErrMissingUpgradeHeader    = errors.New("mssing Upgrade header")
 	ErrInvalidUpgradeHeader    = errors.New("invalid Upgrade header")
@@ -29,5 +30,5 @@ var (
 	ErrNotSupportedSubProtocols = errors.New("unsupported Sec-WebSocket-Protocol")
 	ErrChannelClosed            = errors.New("channel is closed")
 	ErrEmptyPayload             = errors.New("cannot send empty payload")
-	errConnClosed = errors.New("connection is closed")
+	errConnClosed               = errors.New("connection is closed")
 )

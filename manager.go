@@ -52,7 +52,6 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 	}
 
 	go conn.frameListener()
-	go conn.messageListener()
 	go conn.pingLoop()
 
 	return conn, nil

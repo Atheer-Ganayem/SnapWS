@@ -27,6 +27,7 @@ func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 			req.errCh <- req.ctx.Err()
 		}
 	}
+
 	err := conn.write(req.frame)
 	if req.errCh != nil {
 		req.errCh <- err
@@ -72,7 +73,6 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 		return ctx.Err()
 	case conn.message <- req:
 	}
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
