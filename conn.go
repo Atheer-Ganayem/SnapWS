@@ -59,9 +59,8 @@ func (conn *Conn[KeyType]) frameListener() {
 		case req, ok := <-conn.message:
 			// checking if chan is closes
 			if !ok {
-				if req != nil && req.errCh != nil {
-					req.errCh <- ErrChannelClosed
-					close(req.errCh)
+				if req != nil {
+					trySendErr(req.errCh, ErrChannelClosed)
 				}
 				return
 			}
@@ -71,19 +70,18 @@ func (conn *Conn[KeyType]) frameListener() {
 			}
 			if req.ctx.Err() != nil {
 				if req.errCh != nil {
-					req.errCh <- req.ctx.Err()
-					close(req.errCh)
+					trySendErr(req.errCh, req.ctx.Err())
+					break
 				}
 			}
 
-			var err error
 		messageLoop:
 			for _, frame := range *req.frames {
 				if conn.isClosed.Load() {
 					return
 				}
 				if req.ctx.Err() != nil {
-					err = req.ctx.Err()
+					trySendErr(req.errCh, req.ctx.Err())
 					break
 				}
 
@@ -91,8 +89,7 @@ func (conn *Conn[KeyType]) frameListener() {
 				case creq, ok := <-conn.control:
 					if !ok {
 						if creq != nil && creq.errCh != nil {
-							creq.errCh <- ErrChannelClosed
-							close(creq.errCh)
+							trySendErr(creq.errCh, ErrChannelClosed)
 						}
 						return
 					}
@@ -102,18 +99,10 @@ func (conn *Conn[KeyType]) frameListener() {
 					conn.sendFrame(&SendFrameRequest{frame: frame, errCh: req.errCh, ctx: req.ctx})
 					select {
 					case <-req.ctx.Done():
-						err = req.ctx.Err()
+						trySendErr(req.errCh, req.ctx.Err())
+						break messageLoop
 					default:
 					}
-					if err != nil {
-						break messageLoop
-					}
-				}
-			}
-			if err != nil {
-				if req.errCh != nil {
-					req.errCh <- req.ctx.Err()
-					close(req.errCh)
 				}
 			}
 		}

@@ -21,17 +21,23 @@ type SendFrameRequest struct {
 	ctx   context.Context
 }
 
+func trySendErr(errCh chan error, err error) {
+	if errCh != nil {
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
+}
+
 func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 	if req.ctx != nil && req.ctx.Err() != nil {
-		if req.errCh != nil {
-			req.errCh <- req.ctx.Err()
-		}
+		trySendErr(req.errCh, req.ctx.Err())
+		return
 	}
 
 	err := conn.write(req.frame)
-	if req.errCh != nil {
-		req.errCh <- err
-	}
+	trySendErr(req.errCh, err)
 }
 
 // Low level writing, not safe to use concurrently.
