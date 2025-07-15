@@ -14,33 +14,41 @@ import (
 )
 
 type Conn[KeyType comparable] struct {
-	raw     net.Conn
-	Manager *Manager[KeyType]
+	raw       net.Conn
+	Manager   *Manager[KeyType]
+	Key       KeyType
+	isClosed  atomic.Bool
+	closeOnce sync.Once
+	MetaData  sync.Map
+	// Empty string means its a raw websocket
+	SubProtocol string
 
-	//
-	isClosed atomic.Bool
+	// reading channels
+	inboundFrames   chan *internal.Frame
+	inboundMessages chan *internal.FrameGroup
+
+	// writing channels
+
 	// used for sending a internal.FrameGroup, text or binary only.
 	message chan *SendMessageRequest
 	// used for sending control frames.
 	control chan *SendFrameRequest
 	// ticker for ping loop
 	ticker *time.Ticker
-
-	Key       KeyType
-	MetaData  sync.Map
-	closeOnce sync.Once
-	// Empty string means its a raw websocket
-	SubProtocol string
 }
 
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
 	return &Conn[KeyType]{
 		raw:         c,
-		message:     make(chan *SendMessageRequest, 8),
-		control:     make(chan *SendFrameRequest, 4),
 		Manager:     m,
 		Key:         key,
 		SubProtocol: subProtocol,
+
+		inboundFrames:   make(chan *internal.Frame, 32),
+		inboundMessages: make(chan *internal.FrameGroup, 8),
+
+		message: make(chan *SendMessageRequest, 8),
+		control: make(chan *SendFrameRequest, 4),
 	}
 }
 
@@ -141,6 +149,8 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		conn.ticker.Stop()
 		close(conn.message)
 		close(conn.control)
+		close(conn.inboundMessages)
+		close(conn.inboundFrames)
 		conn.Manager.unregister(conn.Key)
 	})
 }

@@ -142,13 +142,13 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 }
 
 func (conn *Conn[Key]) Ping() error {
+	if conn.isClosed.Load() {
+		return errConnClosed
+	}
+
 	frame, err := internal.NewFrame(true, internal.OpcodePing, false, []byte("test"))
 	if err != nil {
 		return err
-	}
-
-	if conn.isClosed.Load() {
-		return errConnClosed
 	}
 
 	errCh := make(chan error)

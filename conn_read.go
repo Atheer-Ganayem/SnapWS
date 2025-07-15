@@ -9,6 +9,21 @@ import (
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
+func (conn *Conn[KeyType]) readLoop() {
+	for {
+		frame, code, err := conn.acceptFrame()
+		if code == internal.CloseNormalClosure && frame != nil {
+			conn.closeWithPayload(frame.Payload)
+			return
+		} else if err != nil {
+			conn.closeWithCode(code, err.Error())
+			return
+		}
+
+		conn.inboundFrames <- frame
+	}
+}
+
 // acceptFrame reads and parses a single WebSocket frame.
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
@@ -18,29 +33,25 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 
 	for {
 		n, err := conn.raw.Read(buf)
+		if err != nil && err != io.EOF {
+			return nil, internal.CloseProtocolError, err
+		}
+		if data.Len()+n > conn.Manager.MaxMessageSize {
+			return nil, internal.CloseMessageTooBig, ErrMessageTooLarge
+		}
 		if n > 0 {
-			data.Write(buf[:n])
+			data.Write(buf[:n]) // there is an error an n i forgot about
 		}
 
-		if err == nil {
-			ok, err := internal.IsCompleteFrame(data.Bytes())
-			if err != nil {
-				return nil, internal.CloseProtocolError, err
-			} else if ok {
-				break
-			}
-		} else if err == io.EOF {
-			ok, err := internal.IsCompleteFrame(data.Bytes())
-			if err != nil {
-				return nil, internal.CloseProtocolError, err
-			}
-			if ok {
-				break
-			} else {
-				return nil, internal.CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
-			}
-		} else {
+		ok, fErr := internal.IsCompleteFrame(data.Bytes())
+		if fErr != nil {
 			return nil, internal.CloseProtocolError, err
+		}
+		if ok {
+			break
+		}
+		if !ok && err == io.EOF {
+			return nil, internal.CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
 		}
 	}
 
@@ -76,61 +87,59 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 // This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
 // the length of returned frames group is always >= 1.
-func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
-	if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
-		conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
-		return nil, err
-	}
-
-	frames := make(internal.FrameGroup, 0, 1)
-	frame, code, err := conn.acceptFrame()
-	if code == internal.CloseNormalClosure && frame != nil {
-		conn.closeWithPayload(frame.Payload)
-		return nil, err
-	} else if err != nil {
-		conn.closeWithCode(code, err.Error())
-		return nil, err
-	}
-
-	frames = append(frames, frame)
-
-	if frame.OPCODE != internal.OpcodeText && frame.OPCODE != internal.OpcodeBinary {
-		conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
-		return nil, ErrInvalidOPCODE
-	}
-	if frame.FIN {
-		return frames, nil
-	}
-
-	totalSize := len(frame.Payload)
+func (conn *Conn[KeyType]) acceptMessage() {
+	go conn.readLoop()
 	for {
-		frame, code, err := conn.acceptFrame()
-		if err != nil {
-			conn.closeWithCode(code, err.Error())
-			return nil, err
-		}
-		if frame.OPCODE != internal.OpcodeContinuation {
-			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
-			return nil, ErrInvalidOPCODE
+		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+			conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
+			return
 		}
 
-		totalSize += len(frame.Payload)
-		if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
-			conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
-			return nil, ErrMessageTooLarge
+		frames := make(internal.FrameGroup, 0, 1)
+		frame, ok := <-conn.inboundFrames
+		if !ok {
+			return
 		}
 		frames = append(frames, frame)
-		if frame.FIN {
-			break
+
+		if frame.OPCODE != internal.OpcodeText && frame.OPCODE != internal.OpcodeBinary {
+			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+			return
 		}
-	}
+		if frame.FIN {
+			conn.inboundMessages <- &frames
+			continue
+		}
 
-	if frames[0].IsText() && !frames.IsValidUTF8() {
-		conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
-		return nil, ErrInvalidUTF8
-	}
+		totalSize := len(frame.Payload)
+		for {
+			frame, ok := <-conn.inboundFrames
+			if !ok {
+				return
+			}
+			if frame.OPCODE != internal.OpcodeContinuation {
+				conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+				return
+			}
 
-	return frames, nil
+			totalSize += len(frame.Payload)
+			if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
+				conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
+				return
+			}
+			frames = append(frames, frame)
+			if frame.FIN {
+				break
+			}
+		}
+
+		if frames[0].IsText() && !frames.IsValidUTF8() {
+			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
+			return
+		}
+
+		conn.inboundMessages <- &frames
+	}
 }
 
 // ReadBinary returns the payload from a WebSocket message (binary or text).
@@ -140,12 +149,15 @@ func (conn *Conn[KeyType]) acceptMessage() (internal.FrameGroup, error) {
 // All errors indicate a protocol or I/O failure, and the connection will be
 // closed automatically by acceptMessage, andthe msgType would be -1.
 func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
-	frames, err := conn.acceptMessage()
-	if err != nil {
-		return -1, nil, err // Connection already close by acceptMessage()
+	if conn.isClosed.Load() {
+		return -1, nil, errConnClosed
+	}
+	frames, ok := <-conn.inboundMessages
+	if !ok {
+		return 0, nil, errConnClosed
 	}
 
-	return int8(frames[0].OPCODE), frames.Payload(), nil
+	return int8((*frames)[0].OPCODE), frames.Payload(), nil
 }
 
 // ReadBinary returns the binary payload from a WebSocket binary message.
