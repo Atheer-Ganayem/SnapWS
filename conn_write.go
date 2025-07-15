@@ -141,7 +141,11 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 	return err
 }
 
-func (conn *Conn[Key]) Ping() error {
+func (conn *Conn[Key]) Ping(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if conn.isClosed.Load() {
 		return errConnClosed
 	}
@@ -152,13 +156,22 @@ func (conn *Conn[Key]) Ping() error {
 	}
 
 	errCh := make(chan error)
-	conn.control <- &SendFrameRequest{
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case conn.control <- &SendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
-		ctx:   nil,
+		ctx:   ctx,
+	}:
 	}
 
-	return <-errCh
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err = <-errCh:
+		return err
+	}
 }
 
 func (conn *Conn[KeyType]) Pong(payload []byte) {

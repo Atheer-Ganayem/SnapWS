@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -31,26 +30,28 @@ func main() {
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.
 		defer conn.Close()
 
-		for {
-			msg, err := conn.ReadString()
-			if err == snapws.ErrMessageTypeMismatch {
-				fmt.Println("received wrong type of message.")
-				continue
-			} else if err != nil {
-				fmt.Printf("Err: %s\n", err.Error())
-				return
-			}
+		time.Sleep(time.Second*5)
 
-			if msg != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
+		// for {
+		// 	msg, err := conn.ReadString()
+		// 	if err == snapws.ErrMessageTypeMismatch {
+		// 		fmt.Println("received wrong type of message.")
+		// 		continue
+		// 	} else if err != nil {
+		// 		fmt.Printf("Err: %s\n", err.Error())
+		// 		return
+		// 	}
 
-				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
-				if err != nil {
-					fmt.Println(err)
-				}
-			}
-		}
+		// 	if msg != "" {
+		// 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// 		defer cancel()
+
+		// 		err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
+		// 		if err != nil {
+		// 			fmt.Println(err)
+		// 		}
+		// 	}
+		// }
 	})
 	fmt.Println("Server listenning")
 	http.ListenAndServe(":8080", nil)

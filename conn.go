@@ -43,6 +43,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		Manager:     m,
 		Key:         key,
 		SubProtocol: subProtocol,
+		ticker:      time.NewTicker(m.PingEvery),
 
 		inboundFrames:   make(chan *internal.Frame, 32),
 		inboundMessages: make(chan *internal.FrameGroup, 8),
@@ -52,7 +53,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 	}
 }
 
-func (conn *Conn[KeyType]) frameListener() {
+func (conn *Conn[KeyType]) listen() {
 	for {
 		select {
 		case req, ok := <-conn.control:
@@ -118,10 +119,14 @@ func (conn *Conn[KeyType]) frameListener() {
 }
 
 func (conn *Conn[KeyType]) pingLoop() {
-	conn.ticker = time.NewTicker(conn.Manager.PingEvery)
-
 	for range conn.ticker.C {
-		conn.Ping()
+		ctx, cancel := context.WithTimeout(context.Background(), conn.Manager.WriteWait)
+		defer cancel()
+
+		if err := conn.Ping(ctx); err != nil {
+			conn.closeWithCode(internal.ClosePolicyViolation, "failed to ping")
+			return
+		}
 	}
 }
 
@@ -146,7 +151,9 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		}
 
 		conn.isClosed.Store(true)
-		conn.ticker.Stop()
+		if conn.ticker != nil {
+			conn.ticker.Stop()
+		}
 		close(conn.message)
 		close(conn.control)
 		close(conn.inboundMessages)
