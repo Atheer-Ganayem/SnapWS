@@ -78,7 +78,6 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 			return conn.acceptFrame()
 
 		case internal.OpcodePong:
-			fmt.Println("pong")
 			conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
 			return conn.acceptFrame()
 		}

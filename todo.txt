@@ -1,9 +1,0 @@
-### test deal lines
-
-- data.Write(buf[:n]) // there is an error an n i forgot about
-
-- TESTS
-- maybe add an atomic counter for conns len
-- add middlewres
-https://chatgpt.com/s/t_687550ce6c5481918d9eb0e1ce92d814
-https://chatgpt.com/s/t_6876703cab8c81918513970abb99945e

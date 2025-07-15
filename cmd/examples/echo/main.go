@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,29 +30,44 @@ func main() {
 		// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.
 		defer conn.Close()
+		time.Sleep(time.Second * 3)
+		for {
+			// msg, err := conn.ReadString()
+			// if err == snapws.ErrMessageTypeMismatch {
+			// 	fmt.Println("received wrong type of message.")
+			// 	continue
+			// } else if err != nil {
+			// 	fmt.Printf("Err: %s\n", err.Error())
+			// 	return
+			// }
+			return
+			_, data, err := conn.Read()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println(string(data))
 
-		time.Sleep(time.Second * 15)
+			if string(data) != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
 
-		// for {
-		// 	msg, err := conn.ReadString()
-		// 	if err == snapws.ErrMessageTypeMismatch {
-		// 		fmt.Println("received wrong type of message.")
-		// 		continue
-		// 	} else if err != nil {
-		// 		fmt.Printf("Err: %s\n", err.Error())
-		// 		return
-		// 	}
+				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", string(data)))
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
 
-		// 	if msg != "" {
-		// 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		// 		defer cancel()
+			// if msg != "" {
+			// 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			// 	defer cancel()
 
-		// 		err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
-		// 		if err != nil {
-		// 			fmt.Println(err)
-		// 		}
-		// 	}
-		// }
+			// 	err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
+			// 	if err != nil {
+			// 		fmt.Println(err)
+			// 	}
+			// }
+		}
 	})
 	fmt.Println("Server listenning")
 	http.ListenAndServe(":8080", nil)

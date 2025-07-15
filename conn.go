@@ -139,17 +139,23 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 
 		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
 
+		errCh := make(chan error)
 		if err == nil && !conn.isClosed.Load() {
 			select {
 			case conn.control <- &SendFrameRequest{
 				frame: &frame,
-				errCh: nil,
+				errCh: errCh,
 			}:
 			default:
-				// channel full => skip sending close frame
 			}
 		}
 
+		select {
+		case <-errCh:
+		case <-time.After(conn.Manager.WriteWait):
+		}
+
+		conn.raw.Close()
 		conn.isClosed.Store(true)
 		if conn.ticker != nil {
 			conn.ticker.Stop()
