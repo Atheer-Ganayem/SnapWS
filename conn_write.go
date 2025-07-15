@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 	"unicode/utf8"
 
@@ -52,6 +53,9 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 	}
 	defer close(errCh)
 
+	if conn.isClosed.Load() {
+		return errConnClosed
+	}
 	select {
 	case conn.message <- req:
 	case <-ctx.Done():
@@ -67,6 +71,10 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 }
 
 func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
+	if str == "" {
+		return ErrEmptyPayload
+	}
+
 	if ok := utf8.ValidString(str); !ok {
 		return ErrInvalidUTF8
 	}
@@ -81,20 +89,68 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 	return err
 }
 
-// func (conn *Conn) SendJSON(val map[string]interface{}) error
-// func (conn *Conn) SendBytes(b []byte) error
-// func (conn *Conn) Ping() error
-
-func (conn *Conn[KeyType]) Pong(payload []byte) {
-	frame := internal.Frame{
-		FIN:           true,
-		OPCODE:        internal.OpcodePong,
-		PayloadLength: len(payload),
-		Payload:       payload,
+func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
+	if v == nil {
+		return ErrEmptyPayload
 	}
 
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	frame, err := internal.NewFrame(true, internal.OpcodeText, false, b)
+	if err != nil {
+		return err
+	}
+
+	err = conn.splitAndSend(ctx, &frame)
+
+	return err
+}
+
+func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
+	if len(b) == 0 {
+		return ErrEmptyPayload
+	}
+
+	frame, err := internal.NewFrame(true, internal.OpcodeBinary, false, b)
+	if err != nil {
+		return err
+	}
+
+	err = conn.splitAndSend(ctx, &frame)
+
+	return err
+}
+
+func (conn *Conn[Key]) Ping() error {
+	frame, err := internal.NewFrame(true, internal.OpcodePing, false, []byte("test"))
+	if err != nil {
+		return err
+	}
+
+	if conn.isClosed.Load() {
+		return errConnClosed
+	}
+
+	errCh := make(chan error)
 	conn.control <- &SendFrameRequest{
 		frame: &frame,
-		errCh: nil,
+		errCh: errCh,
+		ctx:   nil,
+	}
+
+	return <-errCh
+}
+
+func (conn *Conn[KeyType]) Pong(payload []byte) {
+	frame, err := internal.NewFrame(true, internal.OpcodePong, false, payload)
+
+	if err == nil && !conn.isClosed.Load() {
+		conn.control <- &SendFrameRequest{
+			frame: &frame,
+			errCh: nil,
+		}
 	}
 }

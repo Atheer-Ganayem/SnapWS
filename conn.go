@@ -4,25 +4,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 type Conn[KeyType comparable] struct {
-	raw net.Conn
+	raw     net.Conn
+	Manager *Manager[KeyType]
 
+	//
+	isClosed atomic.Bool
 	// used for sending a internal.FrameGroup, text or binary only.
 	message chan *SendMessageRequest
 	// used for sending a single frame from the internal.FrameGroup receive by the mesage channel.
 	frame chan *SendFrameRequest
 	// used for sending control frames.
 	control chan *SendFrameRequest
+	// ticker for ping loop
+	ticker *time.Ticker
 
-	Manager   *Manager[KeyType]
 	Key       KeyType
 	MetaData  sync.Map
 	closeOnce sync.Once
@@ -47,7 +52,6 @@ func (conn *Conn[KeyType]) frameListener() {
 		var err error
 		select {
 		case req, ok := <-conn.control:
-			fmt.Println("received control frame")
 			if !ok {
 				if req != nil && req.errCh != nil {
 					req.errCh <- ErrChannelClosed
@@ -111,6 +115,9 @@ func (conn *Conn[KeyType]) messageListener() {
 			}
 
 			// Send the frame
+			if conn.isClosed.Load() {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				err = ctx.Err()
@@ -138,6 +145,14 @@ func (conn *Conn[KeyType]) messageListener() {
 	}
 }
 
+func (conn *Conn[KeyType]) pingLoop() {
+	conn.ticker = time.NewTicker(conn.Manager.PingEvery)
+
+	for range conn.ticker.C {
+		conn.Ping()
+	}
+}
+
 func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
 		buf := new(bytes.Buffer)
@@ -146,7 +161,8 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		payload := buf.Bytes()
 
 		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
-		if err == nil {
+
+		if err == nil && !conn.isClosed.Load() {
 			select {
 			case conn.control <- &SendFrameRequest{
 				frame: &frame,
@@ -157,9 +173,11 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 			}
 		}
 
-		close(conn.frame)
+		conn.isClosed.Store(true)
+		conn.ticker.Stop()
 		close(conn.message)
 		close(conn.control)
+		close(conn.frame)
 		conn.Manager.unregister(conn.Key)
 	})
 }

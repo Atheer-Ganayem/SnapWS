@@ -51,7 +51,10 @@ func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, err
 		Payload:    payload,
 		MaskingKey: make([]byte, 4),
 	}
-	frame.PayloadLength = len(payload)
+
+	if payload != nil {
+		frame.PayloadLength = len(payload)
+	}
 
 	if IsMasked {
 		_, err := rand.Read(frame.MaskingKey)
@@ -166,7 +169,6 @@ func (frame Frame) SplitIntoGroup(maxSize int) (*FrameGroup, error) {
 		numOfFrames++
 	}
 
-	fmt.Println(numOfFrames)
 	if numOfFrames == 1 {
 		f, err := NewFrame(true, frame.OPCODE, false, frame.Payload)
 		return &FrameGroup{&f}, err

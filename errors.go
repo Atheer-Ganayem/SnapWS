@@ -28,4 +28,6 @@ var (
 	ErrMessageTypeMismatch      = errors.New("websocket message type did not match expected type")
 	ErrNotSupportedSubProtocols = errors.New("unsupported Sec-WebSocket-Protocol")
 	ErrChannelClosed            = errors.New("channel is closed")
+	ErrEmptyPayload             = errors.New("cannot send empty payload")
+	errConnClosed = errors.New("connection is closed")
 )

@@ -1,10 +1,4 @@
-### improtat ###
-
-- i was doing the ctx, i reached messageListener, didn't finish it,
-  i have to finish it and move down to lower funcs to do their ctx
-
-####
-
 - TESTS
 - maybe add an atomic counter for conns len
 - add middlewres
+https://chatgpt.com/s/t_687550ce6c5481918d9eb0e1ce92d814
