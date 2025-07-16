@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
@@ -112,6 +113,21 @@ func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 	return conns
 }
 
+func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyType] {
+	m.Mu.RLock()
+	defer m.Mu.Unlock()
+
+	conns := make([]*Conn[KeyType], 0, len(m.Conns))
+	var n int
+	for k, v := range m.Conns {
+		if k != exclude {
+			conns = append(conns, v)
+			n++
+		}
+	}
+	return conns[:n]
+}
+
 // broadcast sends a message to all active connections.
 // this function is to be used by the library, you can use BroadcastString or BroadcastBytes.
 // It takes a context.Context, a connection "key" to exlude (if you want to include every conn
@@ -126,7 +142,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 		return 0, ErrInvalidOPCODE
 	}
 
-	conns := m.GetAllConns()
+	conns := m.GetAllConnsWithExclude(exclude)
 	connsLength := len(conns)
 	if connsLength == 0 {
 		return 0, nil
@@ -155,9 +171,6 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 			for conn := range ch {
 				if ctx.Err() != nil {
 					return
-				}
-				if conn.Key == exclude {
-					continue
 				}
 				var err error
 				if opcode == internal.OpcodeText {
@@ -190,4 +203,32 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 	case <-ctx.Done():
 		return int(n), ctx.Err()
 	}
+}
+
+// broadcast sends a message to all active connections except the connection of key "exclude".
+// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
+// you can set it as a zero value of your KeyType).
+// data must be a non-empty valid UTF-8 string, otherwise an error will be returned.
+// It returns "n" the number of successfull writes, and an error.
+func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data string) (int, error) {
+	if len(data) <= 0 {
+		return 0, ErrEmptyPayload
+	}
+	if !utf8.ValidString(data) {
+		return 0, ErrInvalidUTF8
+	}
+	return m.broadcast(ctx, exclude, internal.OpcodeText, []byte(data))
+}
+
+// broadcast sends a message to all active connections except the connection of key "exclude".
+// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
+// you can set it as a zero value of your KeyType).
+// data must be a non-empty byte slice, otherwise an error will be returned.
+// It returns "n" the number of successfull writes, and an error.
+func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, data []byte) (int, error) {
+	if len(data) <= 0 {
+		return 0, ErrEmptyPayload
+	}
+
+	return m.broadcast(ctx, exclude, internal.OpcodeBinary, data)
 }

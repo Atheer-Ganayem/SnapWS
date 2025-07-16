@@ -9,18 +9,6 @@ import (
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
-type SendMessageRequest struct {
-	frames *internal.FrameGroup
-	errCh  chan error
-	ctx    context.Context
-}
-
-type SendFrameRequest struct {
-	frame *internal.Frame
-	errCh chan error
-	ctx   context.Context
-}
-
 func trySendErr(errCh chan error, err error) {
 	if errCh != nil {
 		select {

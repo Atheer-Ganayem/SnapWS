@@ -37,6 +37,18 @@ type Conn[KeyType comparable] struct {
 	ticker *time.Ticker
 }
 
+type SendMessageRequest struct {
+	frames *internal.FrameGroup
+	errCh  chan error
+	ctx    context.Context
+}
+
+type SendFrameRequest struct {
+	frame *internal.Frame
+	errCh chan error
+	ctx   context.Context
+}
+
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
 	return &Conn[KeyType]{
 		raw:         c,
