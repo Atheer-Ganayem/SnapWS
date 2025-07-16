@@ -17,61 +17,6 @@ type ConnReader struct {
 	eof          bool
 }
 
-func (r *ConnReader) Read(p []byte) (n int, err error) {
-	if r.eof {
-		return 0, io.EOF
-	}
-	if p == nil {
-		return 0, ErrNilBuf
-	}
-	if len(p) == 0 {
-		return 0, nil
-	}
-
-	for ; r.currentFrame < len(r.frames); r.currentFrame++ {
-		frame := r.frames[r.currentFrame]
-		isLastFrame := r.currentFrame == len(r.frames)-1
-		payload := frame.Payload
-
-		for {
-			if n >= len(p) {
-				return n, nil
-			}
-
-			if r.offset < len(payload) {
-				p[n] = payload[r.offset]
-				n++
-				r.offset++
-			} else if isLastFrame {
-				r.eof = true
-				r.currentFrame++
-				return n, io.EOF
-			} else {
-				r.offset = 0
-				break
-			}
-		}
-	}
-
-	return n, nil
-}
-
-func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, error) {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case frames, ok := <-conn.inboundMessages:
-		if !ok {
-			return nil, Fatal(ErrConnClosed)
-		}
-		return &ConnReader{frames: frames}, nil
-	}
-}
-
 func (conn *Conn[KeyType]) readLoop() {
 	for {
 		frame, code, err := conn.acceptFrame()
@@ -213,22 +158,89 @@ func (conn *Conn[KeyType]) acceptMessage() {
 	}
 }
 
-// ReadBinary returns the payload from a WebSocket message (binary or text).
-// If the receive message was binary, msgType would be equal to internal.OpcodeBinary,
-// if the receive message was binary, msgType would be equal to internal.OpcodeText.
-//
-// All errors are of type snapws.FatalError, indicating a protocol or I/O failure, and the connection will be
-// closed automatically by acceptMessage, andthe msgType would be -1.
-func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
+// //////////
+// ////////////
+func (r *ConnReader) Read(p []byte) (n int, err error) {
+	if r.eof {
+		return 0, io.EOF
+	}
+	if p == nil {
+		return 0, ErrNilBuf
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	for ; r.currentFrame < len(r.frames); r.currentFrame++ {
+		frame := r.frames[r.currentFrame]
+		isLastFrame := r.currentFrame == len(r.frames)-1
+		payload := frame.Payload
+
+		for {
+			if n >= len(p) {
+				return n, nil
+			}
+
+			if r.offset < len(payload) {
+				p[n] = payload[r.offset]
+				n++
+				r.offset++
+			} else if isLastFrame {
+				r.eof = true
+				r.currentFrame++
+				return n, io.EOF
+			} else {
+				r.offset = 0
+				break
+			}
+		}
+	}
+
+	return n, nil
+}
+
+func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, int8, error) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, -1, ctx.Err()
+	case frames, ok := <-conn.inboundMessages:
+		if !ok {
+			return nil, -1, Fatal(ErrConnClosed)
+		}
+		// there is alway at least 1 element in inbound messages
+		return &ConnReader{frames: frames}, int8(frames[0].OPCODE), nil
+	}
+}
+
+// todo comment
+// todo comment
+// todo comment
+// todo comment
+// todo comment
+// todo comment
+func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data []byte, err error) {
 	if conn.isClosed.Load() {
 		return -1, nil, Fatal(ErrConnClosed)
 	}
-	frames, ok := <-conn.inboundMessages
-	if !ok {
-		return 0, nil, Fatal(ErrConnClosed)
+	if ctx == nil {
+		ctx = context.TODO()
 	}
 
-	return int8(frames[0].OPCODE), frames.Payload(), nil
+	reader, msgType, err := conn.NextReader(ctx)
+	if err != nil {
+		return -1, nil, err
+	}
+
+	payload, err := io.ReadAll(reader)
+	if err != nil {
+		return -1, nil, err
+	}
+
+	return msgType, payload, nil
 }
 
 // ReadBinary returns the binary payload from a WebSocket binary message.
@@ -238,8 +250,8 @@ func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
 // or I/O failure, and the connection will be closed automatically by acceptMessage.
 //
 // Note: This method returns the payload of a binary WebSocket message as a []byte slice.
-func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
-	msgType, payload, err := conn.Read()
+func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err error) {
+	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return nil, err
 	} else if msgType != internal.OpcodeBinary {
@@ -254,8 +266,8 @@ func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
 // If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
 // without closing the connection. All other errors are of type snapws.FatalError, indicating a protocol
 // or I/O failure, and the connection will be closed automatically by acceptMessage.
-func (conn *Conn[KeyType]) ReadString() (string, error) {
-	msgType, payload, err := conn.Read()
+func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
+	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return "", err // Connection already close by acceptMessage()
 	} else if msgType != internal.OpcodeText {

@@ -16,7 +16,9 @@ func IsFatalErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.As(err, &FatalError{})
+
+	_, ok := err.(*FatalError)
+	return ok
 }
 
 func Fatal(err error) error {

@@ -30,21 +30,22 @@ func main() {
 		// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.
 		defer conn.Close()
-		time.Sleep(time.Second * 3)
 
 		for {
-			msg, err := conn.ReadString()
-			if err == snapws.ErrMessageTypeMismatch {
+			msg, err := conn.ReadString(context.TODO())
+			fmt.Println(msg, err)
+			if snapws.IsFatalErr(err) {
+				fmt.Println(err)
+				return
+			} else if err != nil {
 				fmt.Println("received wrong type of message.")
 				continue
-			} else if err != nil {
-				fmt.Printf("Err: %s\n", err.Error())
-				return
 			}
+
 			if msg != "" {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
-
+				//
 				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
 				if err != nil {
 					fmt.Println(err)
