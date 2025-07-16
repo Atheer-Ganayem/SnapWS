@@ -13,7 +13,7 @@ import (
 type ConnReader struct {
 	frames       internal.FrameGroup
 	currentFrame int // index of the frame in frames
-	offsest       int // offset of the payload in frame[currentFrame]
+	offset       int // offset of the payload in frame[currentFrame]
 	eof          bool
 }
 
@@ -38,24 +38,22 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 				return n, nil
 			}
 
-			if r.offsest < len(payload) {
-				p[n] = payload[r.offsest]
+			if r.offset < len(payload) {
+				p[n] = payload[r.offset]
 				n++
-				r.offsest++
+				r.offset++
 			} else if isLastFrame {
-				break
+				r.eof = true
+				r.currentFrame++
+				return n, io.EOF
 			} else {
-				r.offsest = 0
+				r.offset = 0
 				break
 			}
 		}
 	}
 
-	r.eof = true
-	if n > 0 {
-		return n, nil
-	}
-	return 0, io.EOF
+	return n, nil
 }
 
 func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, error) {
