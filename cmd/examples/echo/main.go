@@ -31,42 +31,25 @@ func main() {
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.
 		defer conn.Close()
 		time.Sleep(time.Second * 3)
+
 		for {
-			// msg, err := conn.ReadString()
-			// if err == snapws.ErrMessageTypeMismatch {
-			// 	fmt.Println("received wrong type of message.")
-			// 	continue
-			// } else if err != nil {
-			// 	fmt.Printf("Err: %s\n", err.Error())
-			// 	return
-			// }
-			return
-			_, data, err := conn.Read()
-			if err != nil {
-				fmt.Println(err)
+			msg, err := conn.ReadString()
+			if err == snapws.ErrMessageTypeMismatch {
+				fmt.Println("received wrong type of message.")
+				continue
+			} else if err != nil {
+				fmt.Printf("Err: %s\n", err.Error())
 				return
 			}
-			fmt.Println(string(data))
-
-			if string(data) != "" {
+			if msg != "" {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 
-				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", string(data)))
+				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
 				if err != nil {
 					fmt.Println(err)
 				}
 			}
-
-			// if msg != "" {
-			// 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			// 	defer cancel()
-
-			// 	err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
-			// 	if err != nil {
-			// 		fmt.Println(err)
-			// 	}
-			// }
 		}
 	})
 	fmt.Println("Server listenning")

@@ -20,7 +20,12 @@ func (conn *Conn[KeyType]) readLoop() {
 			return
 		}
 
-		conn.inboundFrames <- frame
+		select {
+		case conn.inboundFrames <- frame:
+		default:
+			conn.closeWithCode(internal.ClosePolicyViolation, "inboundFrames full — slow consumer")
+			return
+		}
 	}
 }
 

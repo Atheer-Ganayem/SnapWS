@@ -182,6 +182,7 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 	frame, err := internal.NewFrame(true, internal.OpcodePong, false, payload)
 	if err != nil {
 		conn.closeWithCode(internal.CloseInternalServerErr, "faild to create pong frame")
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.TODO(), conn.Manager.WriteWait)
@@ -202,6 +203,7 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 	case err = <-errCh:
 		if err != nil {
 			conn.closeWithCode(internal.ClosePolicyViolation, "pong failed: "+err.Error())
+			return
 		}
 	}
 }
