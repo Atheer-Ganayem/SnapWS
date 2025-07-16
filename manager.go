@@ -153,6 +153,9 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 		go func() {
 			defer wg.Done()
 			for conn := range ch {
+				if ctx.Err() != nil {
+					return
+				}
 				if conn.Key == exclude {
 					continue
 				}
@@ -171,18 +174,20 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 
 	go func() {
 		for _, conn := range conns {
+			if ctx.Err() != nil {
+				break
+			}
 			ch <- conn
 		}
+		close(ch)
 		wg.Wait()
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		close(ch)
 		return int(n), nil
 	case <-ctx.Done():
-		close(ch)
 		return int(n), ctx.Err()
 	}
 }

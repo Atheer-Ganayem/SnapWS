@@ -30,9 +30,9 @@ type Conn[KeyType comparable] struct {
 	// writing channels
 
 	// used for sending a internal.FrameGroup, text or binary only.
-	message chan *SendMessageRequest
-	// used for sending control frames.
-	control chan *SendFrameRequest
+	outboundMessage chan *SendMessageRequest
+	// used for sending outboundControl frames.
+	outboundControl chan *SendFrameRequest
 	// ticker for ping loop
 	ticker *time.Ticker
 }
@@ -48,15 +48,15 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		inboundFrames:   make(chan *internal.Frame, 32),
 		inboundMessages: make(chan *internal.FrameGroup, 8),
 
-		message: make(chan *SendMessageRequest, 8),
-		control: make(chan *SendFrameRequest, 4),
+		outboundMessage: make(chan *SendMessageRequest, 8),
+		outboundControl: make(chan *SendFrameRequest, 4),
 	}
 }
 
 func (conn *Conn[KeyType]) listen() {
 	for {
 		select {
-		case req, ok := <-conn.control:
+		case req, ok := <-conn.outboundControl:
 			if !ok {
 				if req != nil && req.errCh != nil {
 					req.errCh <- ErrChannelClosed
@@ -65,7 +65,7 @@ func (conn *Conn[KeyType]) listen() {
 			}
 			conn.sendFrame(req)
 
-		case req, ok := <-conn.message:
+		case req, ok := <-conn.outboundMessage:
 			// checking if chan is closes
 			if !ok {
 				if req != nil {
@@ -95,7 +95,7 @@ func (conn *Conn[KeyType]) listen() {
 				}
 
 				select {
-				case creq, ok := <-conn.control:
+				case creq, ok := <-conn.outboundControl:
 					if !ok {
 						if creq != nil && creq.errCh != nil {
 							trySendErr(creq.errCh, ErrChannelClosed)
@@ -142,7 +142,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		errCh := make(chan error)
 		if err == nil && !conn.isClosed.Load() {
 			select {
-			case conn.control <- &SendFrameRequest{
+			case conn.outboundControl <- &SendFrameRequest{
 				frame: &frame,
 				errCh: errCh,
 			}:
@@ -160,8 +160,8 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
-		close(conn.message)
-		close(conn.control)
+		close(conn.outboundMessage)
+		close(conn.outboundControl)
 		close(conn.inboundMessages)
 		close(conn.inboundFrames)
 		conn.Manager.unregister(conn.Key)

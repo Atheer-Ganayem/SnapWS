@@ -81,7 +81,7 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case conn.message <- req:
+	case conn.outboundMessage <- req:
 	}
 	select {
 	case <-ctx.Done():
@@ -186,7 +186,7 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case conn.control <- &SendFrameRequest{
+	case conn.outboundControl <- &SendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
 		ctx:   ctx,
@@ -220,7 +220,7 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 	case <-ctx.Done():
 		conn.closeWithCode(internal.ClosePolicyViolation, "pong enqueue timeout")
 		return
-	case conn.control <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: ctx}:
+	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: ctx}:
 	}
 
 	select {
