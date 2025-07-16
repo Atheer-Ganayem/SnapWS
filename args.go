@@ -43,6 +43,11 @@ type Args[KeyType comparable] struct {
 	//
 	// If false, such connections will be accepted as raw WebSocket connections.
 	RejectRaw bool
+
+	// BroadcastWorkers is an optional function to customize the number of workers
+	// used during broadcasting. It receives the number of connections and returns the desired worker count.
+	// If nil, the default is (connsLength / 10) + 2.
+	BroadcastWorkers func(connsLength int) int
 }
 
 func (args *Args[KeyType]) WithDefault() {

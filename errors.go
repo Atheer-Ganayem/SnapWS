@@ -13,6 +13,9 @@ func (e *FatalError) Error() string {
 }
 
 func IsFatalErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	return errors.As(err, &FatalError{})
 }
 

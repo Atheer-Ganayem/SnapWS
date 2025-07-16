@@ -1,8 +1,12 @@
 package snapws
 
 import (
+	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
+
+	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 type Manager[KeyType comparable] struct {
@@ -97,6 +101,88 @@ func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 	return conn, ok
 }
 
-// Broadcast sends a message to all active connections.
+func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
+	m.Mu.RLock()
+	defer m.Mu.Unlock()
+
+	conns := make([]*Conn[KeyType], 0, len(m.Conns))
+	for _, v := range m.Conns {
+		conns = append(conns, v)
+	}
+	return conns
+}
+
+// broadcast sends a message to all active connections.
+// this function is to be used by the library, you can use BroadcastString or BroadcastBytes.
+// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
+// you can set it as a zero value of you KeyType), opcode (text or binary), data as a slice of bytes.
 // It returns "n" the number of successfull writes, and an error.
-// func (m *Manager[KeyType]) Broadcast() (n int, err error)
+func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode int, data []byte) (int, error) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+
+	if opcode != internal.OpcodeText && opcode != internal.OpcodeBinary {
+		return 0, ErrInvalidOPCODE
+	}
+
+	conns := m.GetAllConns()
+	connsLength := len(conns)
+	if connsLength == 0 {
+		return 0, nil
+	}
+	if len(data) == 0 {
+		return 0, ErrEmptyPayload
+	}
+
+	var workers int
+	if m.BroadcastWorkers != nil {
+		workers = m.BroadcastWorkers(connsLength)
+	}
+	if workers <= 0 {
+		workers = (connsLength / 10) + 2
+	}
+
+	var wg sync.WaitGroup
+	ch := make(chan *Conn[KeyType], workers)
+	done := make(chan struct{})
+	var n int64
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for conn := range ch {
+				if conn.Key == exclude {
+					continue
+				}
+				var err error
+				if opcode == internal.OpcodeText {
+					err = conn.SendString(ctx, string(data))
+				} else {
+					err = conn.SendBytes(ctx, data)
+				}
+				if err == nil {
+					atomic.AddInt64(&n, 1)
+				}
+			}
+		}()
+	}
+
+	go func() {
+		for _, conn := range conns {
+			ch <- conn
+		}
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		close(ch)
+		return int(n), nil
+	case <-ctx.Done():
+		close(ch)
+		return int(n), ctx.Err()
+	}
+}
