@@ -4,6 +4,25 @@ import (
 	"errors"
 )
 
+type FatalError struct {
+	Err error
+}
+
+func (e *FatalError) Error() string {
+	return e.Err.Error()
+}
+
+func IsFatalErr(err error) bool {
+	return errors.As(err, &FatalError{})
+}
+
+func Fatal(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &FatalError{Err: err}
+}
+
 var (
 	ErrTest                    = errors.New("this is just an error for testing")
 	ErrWrongMethod             = errors.New("wrong method, the request method must be GET")
@@ -30,5 +49,5 @@ var (
 	ErrNotSupportedSubProtocols = errors.New("unsupported Sec-WebSocket-Protocol")
 	ErrChannelClosed            = errors.New("channel is closed")
 	ErrEmptyPayload             = errors.New("cannot send empty payload")
-	errConnClosed               = errors.New("connection is closed")
+	ErrConnClosed               = errors.New("connection is closed")
 )

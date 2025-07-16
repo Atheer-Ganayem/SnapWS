@@ -45,11 +45,15 @@ func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 func (conn *Conn[KeyType]) write(frame *internal.Frame) (err error) {
 	err = conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	_, err = conn.raw.Write(frame.Bytes())
-	return err
+	if err != nil {
+		return Fatal(err)
+	}
+
+	return nil
 }
 
 ////////////////////////////////////
@@ -72,7 +76,7 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 	}
 
 	if conn.isClosed.Load() {
-		return errConnClosed
+		return Fatal(ErrConnClosed)
 	}
 	select {
 	case <-ctx.Done():
@@ -87,6 +91,37 @@ func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Fra
 	}
 }
 
+// SendBytes sends the given byte slice as a WebSocket binary message.
+//
+// The payload must be non-empty. If not, the method returns snapws.ErrEmptyPayload.
+// The message will be split into fragments if needed based on WriteBufferSize.
+//
+// All errors except snapws.ErrEmptyPayload are of type snapws.FatalError,
+// indicating that the connection was closed due to an I/O or protocol error.
+func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
+	if len(b) == 0 {
+		return ErrEmptyPayload
+	}
+
+	frame, err := internal.NewFrame(true, internal.OpcodeBinary, false, b)
+	if err != nil {
+		return err
+	}
+
+	err = conn.splitAndSend(ctx, &frame)
+
+	return err
+}
+
+// SendString sends the given string as a WebSocket text message.
+//
+// The string must be valid UTF-8 and non-empty. If it is not, the method returns
+// snapws.ErrEmptyPayload or snapws.ErrInvalidUTF8. The message will be split
+// into fragments if necessary based on WriteBufferSize.
+//
+// All returned errors except for the above are of type snapws.FatalError,
+// indicating an I/O failure or protocol error. These errors will automatically
+// close the connection.
 func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 	if str == "" {
 		return ErrEmptyPayload
@@ -106,6 +141,13 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 	return err
 }
 
+// SendJSON sends the given value as a JSON-encoded WebSocket text message.
+//
+// The value must not be nil. If marshaling fails, the method returns the original
+// marshaling error. The message will be split into fragments if necessary.
+//
+// All errors other than marshaling are of type snapws.FatalError, meaning the connection
+// has been closed due to a protocol or I/O failure.
 func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 	if v == nil {
 		return ErrEmptyPayload
@@ -126,28 +168,13 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 	return err
 }
 
-func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
-	if len(b) == 0 {
-		return ErrEmptyPayload
-	}
-
-	frame, err := internal.NewFrame(true, internal.OpcodeBinary, false, b)
-	if err != nil {
-		return err
-	}
-
-	err = conn.splitAndSend(ctx, &frame)
-
-	return err
-}
-
 func (conn *Conn[Key]) Ping(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	if conn.isClosed.Load() {
-		return errConnClosed
+		return Fatal(ErrConnClosed)
 	}
 
 	frame, err := internal.NewFrame(true, internal.OpcodePing, false, []byte("test"))

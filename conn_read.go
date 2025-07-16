@@ -154,15 +154,15 @@ func (conn *Conn[KeyType]) acceptMessage() {
 // If the receive message was binary, msgType would be equal to internal.OpcodeBinary,
 // if the receive message was binary, msgType would be equal to internal.OpcodeText.
 //
-// All errors indicate a protocol or I/O failure, and the connection will be
+// All errors are of type snapws.FatalError, indicating a protocol or I/O failure, and the connection will be
 // closed automatically by acceptMessage, andthe msgType would be -1.
 func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
 	if conn.isClosed.Load() {
-		return -1, nil, errConnClosed
+		return -1, nil, Fatal(ErrConnClosed)
 	}
 	frames, ok := <-conn.inboundMessages
 	if !ok {
-		return 0, nil, errConnClosed
+		return 0, nil, Fatal(ErrConnClosed)
 	}
 
 	return int8((*frames)[0].OPCODE), frames.Payload(), nil
@@ -171,8 +171,8 @@ func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
 // ReadBinary returns the binary payload from a WebSocket binary message.
 //
 // If the received message is not of type binary, it returns snapws.ErrMessageTypeMismatch
-// without closing the connection. All other errors indicate a protocol or I/O failure,
-// and the connection will be closed automatically by acceptMessage.
+// without closing the connection. All other errors are of type snapws.FatalError, indicating a protocol
+// or I/O failure, and the connection will be closed automatically by acceptMessage.
 //
 // Note: This method returns the payload of a binary WebSocket message as a []byte slice.
 func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
@@ -189,8 +189,8 @@ func (conn *Conn[KeyType]) ReadBinary() (data []byte, err error) {
 // ReadString returns the message payload as a UTF-8 string from a text WebSocket message.
 //
 // If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
-// without closing the connection. All other errors indicate protocol or I/O issues,
-// and the connection will be closed automatically by acceptMessage.
+// without closing the connection. All other errors are of type snapws.FatalError, indicating a protocol
+// or I/O failure, and the connection will be closed automatically by acceptMessage.
 func (conn *Conn[KeyType]) ReadString() (string, error) {
 	msgType, payload, err := conn.Read()
 	if err != nil {
