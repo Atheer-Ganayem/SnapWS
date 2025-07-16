@@ -25,7 +25,7 @@ type Conn[KeyType comparable] struct {
 
 	// reading channels
 	inboundFrames   chan *internal.Frame
-	inboundMessages chan *internal.FrameGroup
+	inboundMessages chan internal.FrameGroup
 
 	// writing channels
 
@@ -38,7 +38,7 @@ type Conn[KeyType comparable] struct {
 }
 
 type SendMessageRequest struct {
-	frames *internal.FrameGroup
+	frames internal.FrameGroup
 	errCh  chan error
 	ctx    context.Context
 }
@@ -58,7 +58,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		ticker:      time.NewTicker(m.PingEvery),
 
 		inboundFrames:   make(chan *internal.Frame, 32),
-		inboundMessages: make(chan *internal.FrameGroup, 8),
+		inboundMessages: make(chan internal.FrameGroup, 8),
 
 		outboundMessage: make(chan *SendMessageRequest, 8),
 		outboundControl: make(chan *SendFrameRequest, 4),
@@ -97,7 +97,7 @@ func (conn *Conn[KeyType]) listen() {
 			}
 
 		messageLoop:
-			for _, frame := range *req.frames {
+			for _, frame := range req.frames {
 				if conn.isClosed.Load() {
 					return
 				}

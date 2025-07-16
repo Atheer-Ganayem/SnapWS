@@ -2,12 +2,77 @@ package snapws
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
+
+type ConnReader struct {
+	frames       internal.FrameGroup
+	currentFrame int // index of the frame in frames
+	offsest       int // offset of the payload in frame[currentFrame]
+	eof          bool
+}
+
+func (r *ConnReader) Read(p []byte) (n int, err error) {
+	if r.eof {
+		return 0, io.EOF
+	}
+	if p == nil {
+		return 0, ErrNilBuf
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	for ; r.currentFrame < len(r.frames); r.currentFrame++ {
+		frame := r.frames[r.currentFrame]
+		isLastFrame := r.currentFrame == len(r.frames)-1
+		payload := frame.Payload
+
+		for {
+			if n >= len(p) {
+				return n, nil
+			}
+
+			if r.offsest < len(payload) {
+				p[n] = payload[r.offsest]
+				n++
+				r.offsest++
+			} else if isLastFrame {
+				break
+			} else {
+				r.offsest = 0
+				break
+			}
+		}
+	}
+
+	r.eof = true
+	if n > 0 {
+		return n, nil
+	}
+	return 0, io.EOF
+}
+
+func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, error) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case frames, ok := <-conn.inboundMessages:
+		if !ok {
+			return nil, Fatal(ErrConnClosed)
+		}
+		return &ConnReader{frames: frames}, nil
+	}
+}
 
 func (conn *Conn[KeyType]) readLoop() {
 	for {
@@ -115,7 +180,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			return
 		}
 		if frame.FIN {
-			conn.inboundMessages <- &frames
+			conn.inboundMessages <- frames
 			continue
 		}
 
@@ -146,7 +211,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			return
 		}
 
-		conn.inboundMessages <- &frames
+		conn.inboundMessages <- frames
 	}
 }
 
@@ -165,7 +230,7 @@ func (conn *Conn[KeyType]) Read() (msgType int8, data []byte, err error) {
 		return 0, nil, Fatal(ErrConnClosed)
 	}
 
-	return int8((*frames)[0].OPCODE), frames.Payload(), nil
+	return int8(frames[0].OPCODE), frames.Payload(), nil
 }
 
 // ReadBinary returns the binary payload from a WebSocket binary message.
