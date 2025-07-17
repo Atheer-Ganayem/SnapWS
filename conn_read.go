@@ -11,11 +11,13 @@ import (
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
+// ConnReader provides an io.Reader interface over a websocket message (frame group).
+// It supports reading fragmented frames as a single continuous stream.
 type ConnReader struct {
-	frames       internal.FrameGroup
-	currentFrame int // index of the frame in frames
-	offset       int // offset of the payload in frame[currentFrame]
-	eof          bool
+	frames       internal.FrameGroup // Group of frames making up the complete message
+	currentFrame int                 // Index of the current frame being read
+	offset       int                 // Offset into the current frame's payload
+	eof          bool                // Indicates if all frames have been fully read
 }
 
 func (conn *Conn[KeyType]) readLoop() {
@@ -159,8 +161,10 @@ func (conn *Conn[KeyType]) acceptMessage() {
 	}
 }
 
-// //////////
-// ////////////
+// Read reads data from the current frame group (message) into the provided byte slice `p`.
+// It reads sequentially across multiple frames if needed, until `p` is full or EOF is reached.
+// Returns the number of bytes read and any error encountered.
+// When all frames are fully consumed, it returns io.EOF.
 func (r *ConnReader) Read(p []byte) (n int, err error) {
 	if r.eof {
 		return 0, io.EOF
@@ -200,6 +204,11 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
+// NextReader returns an io.Reader for the next complete WebSocket message.
+// It blocks until a full message is available or the context is canceled.
+// The returned reader allows streaming the message payload frame-by-frame,
+// and the second return value indicates the message type (e.g., Text or Binary).
+// If the connection is closed or the context expires, it returns a non-nil error.
 func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, int8, error) {
 	if ctx == nil {
 		ctx = context.TODO()
@@ -217,12 +226,10 @@ func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, int8, err
 	}
 }
 
-// todo comment
-// todo comment
-// todo comment
-// todo comment
-// todo comment
-// todo comment
+// ReadMessage reads the next complete WebSocket message into memory.
+// It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
+// The context controls cancellation or timeout. If the connection is closed or the context expires,
+// it returns an appropriate error.
 func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data []byte, err error) {
 	if conn.isClosed.Load() {
 		return -1, nil, Fatal(ErrConnClosed)
