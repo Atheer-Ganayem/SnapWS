@@ -3,11 +3,44 @@ package snapws
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
+
+type ConnWriter[KeyType comparable] struct {
+	conn *Conn[KeyType]
+	buf  []byte
+}
+
+func (conn *Conn[KeyType]) NewWriter() *ConnWriter[KeyType] {
+	return &ConnWriter[KeyType]{
+		conn: conn,
+		buf:  make([]byte, conn.Manager.WriteBufferSize),
+	}
+}
+
+func (conn *Conn[KeyType]) NextWrite() (io.WriteCloser, error) {
+	if conn.isClosed.Load() {
+		return nil, Fatal(ErrConnClosed)
+	}
+
+	return conn.NewWriter(), nil
+}
+
+func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (w *ConnWriter[KeyType]) Flush() error {
+	return nil
+}
+
+func (w *ConnWriter[KeyType]) Close() error {
+	return nil
+}
 
 func trySendErr(errCh chan error, err error) {
 	if errCh != nil {

@@ -64,7 +64,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 
 		ok, fErr := internal.IsCompleteFrame(data.Bytes())
 		if fErr != nil {
-			return nil, internal.CloseProtocolError, err
+			return nil, internal.CloseProtocolError, fErr
 		}
 		if ok {
 			break
@@ -107,7 +107,6 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
 // the length of returned frames group is always >= 1.
 func (conn *Conn[KeyType]) acceptMessage() {
-	go conn.readLoop()
 	for {
 		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
 			conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
