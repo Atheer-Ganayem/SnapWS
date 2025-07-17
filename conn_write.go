@@ -11,35 +11,111 @@ import (
 )
 
 type ConnWriter[KeyType comparable] struct {
-	conn *Conn[KeyType]
-	buf  []byte
+	conn   *Conn[KeyType]
+	buf    []byte
+	used   int
+	opcode uint8
+	closed bool
 }
 
-func (conn *Conn[KeyType]) NewWriter() *ConnWriter[KeyType] {
+func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
 	return &ConnWriter[KeyType]{
-		conn: conn,
-		buf:  make([]byte, conn.Manager.WriteBufferSize),
+		conn:   conn,
+		buf:    make([]byte, conn.Manager.WriteBufferSize),
+		opcode: opcode,
 	}
 }
 
-func (conn *Conn[KeyType]) NextWrite() (io.WriteCloser, error) {
+func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (io.WriteCloser, error) {
 	if conn.isClosed.Load() {
 		return nil, Fatal(ErrConnClosed)
 	}
+	if msgType != internal.OpcodeText && msgType != internal.OpcodeBinary {
+		return nil, ErrInvalidOPCODE
+	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
 
-	return conn.NewWriter(), nil
+	err := conn.lockW(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn.NewWriter(msgType), nil
 }
 
 func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
-	return 0, nil
+	if w.closed {
+		return 0, ErrWriterClosed
+	}
+	for n < len(p) {
+		if w.used == len(w.buf) {
+			if err := w.Flush(false); err != nil {
+				return n, err
+			}
+			w.used = 0
+		}
+
+		space := len(w.buf) - w.used
+		remain := len(p) - n
+		toCopy := space
+		if remain < space {
+			toCopy = remain
+		}
+
+		copy(w.buf[w.used:], p[n:n+toCopy])
+		w.used += toCopy
+		n += toCopy
+	}
+	return n, nil
 }
 
-func (w *ConnWriter[KeyType]) Flush() error {
-	return nil
+func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
+	if w.closed {
+		return ErrWriterClosed
+	}
+	if w.conn.isClosed.Load() {
+		return Fatal(ErrChannelClosed)
+	}
+
+	frame, err := internal.NewFrame(FIN, w.opcode, false, w.buf[:w.used])
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), w.conn.Manager.WriterTimeout)
+	defer cancel()
+	errCh := make(chan error)
+	req := &SendFrameRequest{
+		frame: &frame,
+		errCh: errCh,
+		ctx:   ctx,
+	}
+
+	select {
+	case w.conn.outboundFrames <- req:
+	case <-ctx.Done():
+		return ErrWriteChanFull
+	}
+
+	select {
+	case err, ok := <-errCh:
+		if !ok {
+			return Fatal(ErrChannelClosed)
+		}
+		return err
+	case <-ctx.Done():
+		close(errCh)
+		return ErrWriteChanFull
+	}
 }
 
 func (w *ConnWriter[KeyType]) Close() error {
-	return nil
+	defer w.conn.unlockW(nil)
+	err := w.Flush(true)
+	w.closed = true
+	return err
 }
 
 func trySendErr(errCh chan error, err error) {
@@ -57,13 +133,13 @@ func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 		return
 	}
 
-	err := conn.write(req.frame)
+	err := conn.writeFrame(req.frame)
 	trySendErr(req.errCh, err)
 }
 
 // Low level writing, not safe to use concurrently.
 // Use SendString, SendJSON, SendBytes for safe writing.
-func (conn *Conn[KeyType]) write(frame *internal.Frame) (err error) {
+func (conn *Conn[KeyType]) writeFrame(frame *internal.Frame) (err error) {
 	err = conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
 		return Fatal(err)
@@ -75,41 +151,6 @@ func (conn *Conn[KeyType]) write(frame *internal.Frame) (err error) {
 	}
 
 	return nil
-}
-
-////////////////////////////////////
-
-func (conn *Conn[KeyType]) splitAndSend(ctx context.Context, frame *internal.Frame) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	frames, err := frame.SplitIntoGroup(conn.Manager.WriteBufferSize)
-	if err != nil {
-		return err
-	}
-
-	errCh := make(chan error)
-	req := &SendMessageRequest{
-		frames: frames,
-		errCh:  errCh,
-		ctx:    ctx,
-	}
-
-	if conn.isClosed.Load() {
-		return Fatal(ErrConnClosed)
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case conn.outboundMessage <- req:
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-errCh:
-		return err
-	}
 }
 
 // SendBytes sends the given byte slice as a WebSocket binary message.
@@ -124,14 +165,17 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 		return ErrEmptyPayload
 	}
 
-	frame, err := internal.NewFrame(true, internal.OpcodeBinary, false, b)
+	w, err := conn.NextWriter(ctx, internal.OpcodeBinary)
 	if err != nil {
 		return err
 	}
 
-	err = conn.splitAndSend(ctx, &frame)
+	_, err = w.Write(b)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return w.Close()
 }
 
 // SendString sends the given string as a WebSocket text message.
@@ -152,14 +196,17 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 		return ErrInvalidUTF8
 	}
 
-	frame, err := internal.NewFrame(true, internal.OpcodeText, false, []byte(str))
+	w, err := conn.NextWriter(ctx, internal.OpcodeText)
 	if err != nil {
 		return err
 	}
 
-	err = conn.splitAndSend(ctx, &frame)
+	_, err = io.WriteString(w, str)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return w.Close()
 }
 
 // SendJSON sends the given value as a JSON-encoded WebSocket text message.
@@ -174,19 +221,17 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 		return ErrEmptyPayload
 	}
 
-	b, err := json.Marshal(v)
+	w, err := conn.NextWriter(ctx, internal.OpcodeText)
 	if err != nil {
 		return err
 	}
 
-	frame, err := internal.NewFrame(true, internal.OpcodeText, false, b)
+	err = json.NewEncoder(w).Encode(v)
 	if err != nil {
 		return err
 	}
 
-	err = conn.splitAndSend(ctx, &frame)
-
-	return err
+	return w.Close()
 }
 
 func (conn *Conn[Key]) Ping(ctx context.Context) error {

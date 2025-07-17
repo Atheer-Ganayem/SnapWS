@@ -30,17 +30,12 @@ type Conn[KeyType comparable] struct {
 	// writing channels
 
 	// used for sending a internal.FrameGroup, text or binary only.
-	outboundMessage chan *SendMessageRequest
+	outboundFrames chan *SendFrameRequest
+	wLock          chan struct{}
 	// used for sending outboundControl frames.
 	outboundControl chan *SendFrameRequest
 	// ticker for ping loop
 	ticker *time.Ticker
-}
-
-type SendMessageRequest struct {
-	frames internal.FrameGroup
-	errCh  chan error
-	ctx    context.Context
 }
 
 type SendFrameRequest struct {
@@ -58,10 +53,32 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		ticker:      time.NewTicker(m.PingEvery),
 
 		inboundFrames:   make(chan *internal.Frame, 32),
+		wLock:           make(chan struct{}, 1),
 		inboundMessages: make(chan internal.FrameGroup, 8),
 
-		outboundMessage: make(chan *SendMessageRequest, 8),
+		outboundFrames:  make(chan *SendFrameRequest, 16),
 		outboundControl: make(chan *SendFrameRequest, 4),
+	}
+}
+
+func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
+	select {
+	case conn.wLock <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (conn *Conn[KeyType]) unlockW(ctx context.Context) error {
+	select {
+	case _, ok := <-conn.wLock:
+		if !ok {
+			return Fatal(ErrChannelClosed)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -77,12 +94,13 @@ func (conn *Conn[KeyType]) listen() {
 			}
 			conn.sendFrame(req)
 
-		case req, ok := <-conn.outboundMessage:
+		case req, ok := <-conn.outboundFrames:
+			if req == nil {
+				break
+			}
 			// checking if chan is closes
 			if !ok {
-				if req != nil {
-					trySendErr(req.errCh, ErrChannelClosed)
-				}
+				trySendErr(req.errCh, ErrChannelClosed)
 				return
 			}
 			// checking if ctx is done
@@ -95,37 +113,7 @@ func (conn *Conn[KeyType]) listen() {
 					break
 				}
 			}
-
-		messageLoop:
-			for _, frame := range req.frames {
-				if conn.isClosed.Load() {
-					return
-				}
-				if req.ctx.Err() != nil {
-					trySendErr(req.errCh, req.ctx.Err())
-					break
-				}
-
-				select {
-				case creq, ok := <-conn.outboundControl:
-					if !ok {
-						if creq != nil && creq.errCh != nil {
-							trySendErr(creq.errCh, ErrChannelClosed)
-						}
-						return
-					}
-					conn.sendFrame(creq)
-
-				default:
-					conn.sendFrame(&SendFrameRequest{frame: frame, errCh: req.errCh, ctx: req.ctx})
-					select {
-					case <-req.ctx.Done():
-						trySendErr(req.errCh, req.ctx.Err())
-						break messageLoop
-					default:
-					}
-				}
-			}
+			conn.sendFrame(req)
 		}
 	}
 }
@@ -172,7 +160,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
-		close(conn.outboundMessage)
+		close(conn.outboundFrames)
 		close(conn.outboundControl)
 		close(conn.inboundMessages)
 		close(conn.inboundFrames)

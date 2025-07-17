@@ -56,5 +56,7 @@ var (
 	ErrEmptyPayload             = errors.New("cannot send empty payload")
 	ErrConnClosed               = errors.New("connection is closed")
 
-	ErrNilBuf = errors.New("cannot read into a nil buffer")
+	ErrNilBuf        = errors.New("cannot read into a nil buffer")
+	ErrWriteChanFull = errors.New("write channel is full, slow client, message dropped.")
+	ErrWriterClosed  = errors.New("writer is closed")
 )
