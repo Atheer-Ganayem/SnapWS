@@ -11,8 +11,9 @@ import (
 
 func main() {
 	manager := snapws.NewManager(&snapws.Args[string]{
-		PingEvery: time.Second * 5,
-		ReadWait:  time.Second * 10,
+		PingEvery:       time.Second * 5,
+		ReadWait:        time.Second * 10,
+		WriteBufferSize: 5,
 	})
 	manager.OnConnect = func(id string, conn *snapws.Conn[string]) {
 		fmt.Printf("User %s has been connected\n", id)
@@ -33,7 +34,6 @@ func main() {
 
 		for {
 			msg, err := conn.ReadString(context.TODO())
-			fmt.Println(msg, err)
 			if snapws.IsFatalErr(err) {
 				fmt.Println(err)
 				return

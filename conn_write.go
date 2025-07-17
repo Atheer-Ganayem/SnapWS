@@ -3,6 +3,7 @@ package snapws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 	"unicode/utf8"
@@ -11,11 +12,12 @@ import (
 )
 
 type ConnWriter[KeyType comparable] struct {
-	conn   *Conn[KeyType]
-	buf    []byte
-	used   int
-	opcode uint8
-	closed bool
+	conn       *Conn[KeyType]
+	buf        []byte
+	used       int
+	opcode     uint8
+	closed     bool
+	flushCount int
 }
 
 func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
@@ -79,7 +81,12 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return Fatal(ErrChannelClosed)
 	}
 
-	frame, err := internal.NewFrame(FIN, w.opcode, false, w.buf[:w.used])
+	opcdoe := w.opcode
+	if w.flushCount > 0 {
+		opcdoe = internal.OpcodeContinuation
+	}
+
+	frame, err := internal.NewFrame(FIN, opcdoe, false, w.buf[:w.used])
 	if err != nil {
 		return err
 	}
@@ -93,6 +100,7 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		ctx:   ctx,
 	}
 
+	w.flushCount++
 	select {
 	case w.conn.outboundFrames <- req:
 	case <-ctx.Done():
@@ -104,15 +112,15 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		if !ok {
 			return Fatal(ErrChannelClosed)
 		}
+		fmt.Println(err)
 		return err
 	case <-ctx.Done():
-		close(errCh)
 		return ErrWriteChanFull
 	}
 }
 
 func (w *ConnWriter[KeyType]) Close() error {
-	defer w.conn.unlockW(nil)
+	defer w.conn.unlockW(context.TODO())
 	err := w.Flush(true)
 	w.closed = true
 	return err
@@ -145,6 +153,9 @@ func (conn *Conn[KeyType]) writeFrame(frame *internal.Frame) (err error) {
 		return Fatal(err)
 	}
 
+	if frame.OPCODE != internal.OpcodePing {
+		fmt.Printf("Writing frame %v: %s\n", frame.OPCODE, frame.Payload)
+	}
 	_, err = conn.raw.Write(frame.Bytes())
 	if err != nil {
 		return Fatal(err)

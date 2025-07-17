@@ -65,7 +65,7 @@ func (args *Args[KeyType]) WithDefault() {
 		args.PingEvery = defaultPingEvery
 	}
 	if args.WriterTimeout == 0 {
-		args.PingEvery = defaultWriterTimeout
+		args.WriterTimeout = defaultWriterTimeout
 	}
 	if args.MaxMessageSize == 0 {
 		args.MaxMessageSize = DefaultMaxMessageSize
