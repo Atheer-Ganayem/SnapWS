@@ -3,6 +3,7 @@ package snapws
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -278,20 +279,21 @@ func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
 }
 
 // ReadJSON reads a text WebSocket message and unmarshals its payload into the given value.
-//
+
 // This method expects the message to be of type text and contain valid UTF-8 encoded JSON.
 // If the message is not of type text, it returns snapws.ErrMessageTypeMismatch without
+// closing the connection. if the text is not a valid json, an error will be returned without
 // closing the connection.
-//
-// All other errors (such as protocol errors or connection issues) will cause the connection
-// to be closed automatically by acceptMessage.
-// func (conn *Conn[KeyType]) ReadJSON(v any) error {
-// 	msgType, payload, err := conn.Read()
-// 	if err != nil {
-// 		return err // Connection already close by acceptMessage()
-// 	} else if msgType != internal.OpcodeText {
-// 		return ErrMessageTypeMismatch
-// 	}
+// All other errors are of type snapws.FatalError, indicating a protocol
+// or I/O failure, and the connection will be closed automatically by acceptMessage.
+func (conn *Conn[KeyType]) ReadJSON(ctx context.Context, v any) error {
+	reader, msgType, err := conn.NextReader(ctx)
+	if err != nil {
+		return err
+	}
+	if msgType != internal.OpcodeText {
+		return ErrMessageTypeMismatch
+	}
 
-// 	return json.Unmarshal(payload, v)
-// }
+	return json.NewDecoder(reader).Decode(v)
+}
