@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -15,23 +16,31 @@ func main() {
 		ReadWait:        time.Second * 10,
 		WriteBufferSize: 1024,
 	})
+	manager.Use(func(w http.ResponseWriter, r *http.Request) error {
+		if r.URL.Query().Get("auth") != "123" {
+			return errors.New("not auth")
+		}
+		fmt.Println("middleware1")
+		return nil
+	})
+	manager.Use(func(w http.ResponseWriter, r *http.Request) error {
+		fmt.Println("middleware2")
+		return nil
+	})
 	manager.OnConnect = func(id string, conn *snapws.Conn[string]) {
 		fmt.Printf("User %s has been connected\n", id)
 	}
 	manager.OnDisconnect = func(id string, conn *snapws.Conn[string]) {
 		fmt.Printf("User %s has been disconnected\n", id)
 	}
-	go func() {
-		time.Sleep(time.Second * 10)
-		manager.Shutdown()
-		fmt.Println(manager.GetAllConns())
-	}()
+	defer manager.Shutdown()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := manager.Connect(r.RemoteAddr, w, r)
 		if err != nil {
-			w.Write([]byte(err.Error()))
 			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
+			return
 		}
 		// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
 		// hoverever, defering conn.Close() is the best practice just in case it stay open.

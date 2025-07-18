@@ -10,7 +10,7 @@ import (
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-func handShake(w http.ResponseWriter, r *http.Request, subProtocols []string, rejectRaw bool) (string, error) {
+func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (string, error) {
 	if r.Method != http.MethodGet {
 		return "", ErrWrongMethod
 	}
@@ -28,13 +28,21 @@ func handShake(w http.ResponseWriter, r *http.Request, subProtocols []string, re
 		return "", err
 	}
 
-	subProtocol := ChooseSubProtocol(r, subProtocols)
-	if subProtocol == "" && rejectRaw {
+	subProtocol := ChooseSubProtocol(r, m.SubProtocols)
+	if subProtocol == "" && m.RejectRaw {
 		return "", ErrNotSupportedSubProtocols
 	}
 
 	hashedKey := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + GUID))
 	secAcceptKey := base64.StdEncoding.EncodeToString(hashedKey[:])
+
+	if m.Middlwares != nil {
+		for _, middleware := range m.Middlwares {
+			if err := middleware(w, r); err != nil {
+				return "", err
+			}
+		}
+	}
 
 	if subProtocol != "" {
 		w.Header().Set("Sec-WebSocket-Protocol", subProtocol)

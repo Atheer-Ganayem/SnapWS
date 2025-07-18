@@ -1,6 +1,9 @@
 package snapws
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 const (
 	defaultWriteWait       = time.Second * 5
@@ -13,7 +16,11 @@ const (
 )
 
 type Args[KeyType comparable] struct {
-	OnConnect    func(id KeyType, conn *Conn[KeyType])
+	// Ran before finalizing and accepting the handshake.
+	Middlwares []Middlware
+	// Ran when the connection finalizes.
+	OnConnect func(id KeyType, conn *Conn[KeyType])
+	// Ran when connection closes.
 	OnDisconnect func(id KeyType, conn *Conn[KeyType])
 
 	// If not set it will default to 5 seconds.
@@ -53,6 +60,11 @@ type Args[KeyType comparable] struct {
 	// If nil, the default is (connsLength / 10) + 2.
 	BroadcastWorkers func(connsLength int) int
 }
+
+// If an error returns the connection wont be accepted.
+// The functions are ran by their order in the slice.
+type Middlwares []Middlware
+type Middlware func(w http.ResponseWriter, r *http.Request) error
 
 func (args *Args[KeyType]) WithDefault() {
 	if args.WriteWait == 0 {
