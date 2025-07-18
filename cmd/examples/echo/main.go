@@ -38,8 +38,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := manager.Connect(r.RemoteAddr, w, r)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error()))
+			handleHandshakeErr(w, err)
 			return
 		}
 		// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
@@ -70,4 +69,17 @@ func main() {
 	})
 	fmt.Println("Server listenning")
 	http.ListenAndServe(":8080", nil)
+}
+
+func handleHandshakeErr(w http.ResponseWriter, err error) {
+	if hErr, ok := snapws.AsHttpErr(err); ok {
+		if hErr.IsJson {
+			w.Header().Add("Content-Type", "application/json")
+		}
+		w.WriteHeader(hErr.Code)
+		w.Write([]byte(hErr.Message))
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+	}
 }

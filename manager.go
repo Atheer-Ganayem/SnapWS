@@ -100,7 +100,7 @@ func (m *Manager[KeyType]) Use(mw Middlware) {
 
 func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 	m.Mu.RLock()
-	defer m.Mu.Unlock()
+	defer m.Mu.RUnlock()
 
 	conn, ok := m.Conns[key]
 

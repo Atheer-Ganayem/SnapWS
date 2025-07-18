@@ -61,11 +61,6 @@ type Args[KeyType comparable] struct {
 	BroadcastWorkers func(connsLength int) int
 }
 
-// If an error returns the connection wont be accepted.
-// The functions are ran by their order in the slice.
-type Middlwares []Middlware
-type Middlware func(w http.ResponseWriter, r *http.Request) error
-
 func (args *Args[KeyType]) WithDefault() {
 	if args.WriteWait == 0 {
 		args.WriteWait = defaultWriteWait
@@ -88,4 +83,32 @@ func (args *Args[KeyType]) WithDefault() {
 	if args.WriteBufferSize == 0 {
 		args.WriteBufferSize = DefaultWriteBufferSize
 	}
+}
+
+// If an error returns the connection wont be accepted.
+// The functions are ran by their order in the slice.
+type Middlwares []Middlware
+type Middlware func(w http.ResponseWriter, r *http.Request) error
+
+type HttpErr struct {
+	Code    int
+	Message string
+	IsJson  bool
+}
+
+func AsHttpErr(err error) (*HttpErr, bool) {
+	e, ok := err.(*HttpErr)
+	return e, ok
+}
+
+func (err *HttpErr) Error() string {
+	return err.Message
+}
+
+func NewHttpErr(code int, message string) *HttpErr {
+	return &HttpErr{Code: code, Message: message, IsJson: false}
+}
+
+func NewHttpJSONErr(code int, message string) *HttpErr {
+	return &HttpErr{Code: code, Message: message, IsJson: true}
 }
