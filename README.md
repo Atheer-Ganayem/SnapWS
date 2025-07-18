@@ -1,4 +1,7 @@
 # snapws
+![Go Version](https://img.shields.io/badge/go-%3E=1.18-blue)
+![License](https://img.shields.io/github/license/yourusername/snapws)
+![Status](https://img.shields.io/badge/status-in%20development-yellow)
 
 A lightweight WebSocket library for Go, designed to make working with WebSockets **simple, intuitive, and minimal** — especially for developers who **just want it to work** without having to manage ping/pong, connection safety, or concurrency manually.
 
