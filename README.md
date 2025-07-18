@@ -2,6 +2,9 @@
 
 A lightweight WebSocket library for Go, designed to make working with WebSockets **simple, intuitive, and minimal** — especially for developers who **just want it to work** without having to manage ping/pong, connection safety, or concurrency manually.
 
+> 🚧 **UNDER DEVELOPMENT** 🚧  
+> This library is not yet production-ready. Expect breaking changes as development continues.
+
 > 🧠 **Why?**  
 > Using [gorilla/websocket](https://github.com/gorilla/websocket) often felt like overkill. You had to write a lot of code, worry about race conditions, manually handle timeouts, and understand the WebSocket protocol more deeply than necessary.  
 >  
