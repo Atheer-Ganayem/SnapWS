@@ -21,9 +21,10 @@ A lightweight WebSocket library for Go, designed to make working with WebSockets
 - ✅ Automatic handling of ping/pong (you don't need to write it).
 - ✅ Connection management built-in — no need to write your own manager.
 - ✅ Safe for concurrent use — internally protected.
+- ✅ Support for middlewares and connect/disconnect hooks.
 - ✅ Sensible defaults (timeouts, buffer sizes).
 - ✅ Supports both text and binary frames.
-- ✅ Read/write APIs feel like working with `net.Conn`.
+- ✅ Read/write APIs.
 
 ---
 
