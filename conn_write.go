@@ -53,7 +53,6 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 			if err := w.Flush(false); err != nil {
 				return n, err
 			}
-			w.used = 0
 		}
 
 		space := len(w.buf) - w.used
@@ -78,12 +77,12 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return Fatal(ErrChannelClosed)
 	}
 
-	opcdoe := w.opcode
+	opcode := w.opcode
 	if w.flushCount > 0 {
-		opcdoe = OpcodeContinuation
+		opcode = OpcodeContinuation
 	}
 
-	frame, err := NewFrame(FIN, opcdoe, false, w.buf[:w.used])
+	frame, err := NewFrame(FIN, opcode, false, w.buf[:w.used])
 	if err != nil {
 		return err
 	}
@@ -98,6 +97,7 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	}
 
 	w.flushCount++
+	w.used = 0
 	select {
 	case w.conn.outboundFrames <- req:
 	case <-ctx.Done():
@@ -247,7 +247,7 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 		return Fatal(ErrConnClosed)
 	}
 
-	frame, err := NewFrame(true, OpcodePing, false, []byte("test"))
+	frame, err := NewFrame(true, OpcodePing, false, nil)
 	if err != nil {
 		return err
 	}

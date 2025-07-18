@@ -119,13 +119,14 @@ func (conn *Conn[KeyType]) listen() {
 func (conn *Conn[KeyType]) pingLoop() {
 	for range conn.ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), conn.Manager.WriteWait)
-		defer cancel()
-
-		if err := conn.Ping(ctx); err != nil {
+		err := conn.Ping(ctx)
+		cancel()
+		if err != nil {
 			conn.closeWithCode(ClosePolicyViolation, "failed to ping")
 			return
 		}
 	}
+
 }
 
 func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
