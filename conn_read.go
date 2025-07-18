@@ -175,27 +175,32 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	for ; r.currentFrame < len(r.frames); r.currentFrame++ {
+	for r.currentFrame < len(r.frames) {
 		frame := r.frames[r.currentFrame]
 		isLastFrame := r.currentFrame == len(r.frames)-1
 		payload := frame.Payload
 
-		for {
-			if n >= len(p) {
-				return n, nil
+		if r.offset < len(payload) {
+			space := len(p) - n
+			remain := len(payload) - r.offset
+			toCopy := space
+			if remain < space {
+				toCopy = remain
 			}
 
-			if r.offset < len(payload) {
-				p[n] = payload[r.offset]
-				n++
-				r.offset++
-			} else if isLastFrame {
+			copy(p[n:], payload[r.offset:r.offset+toCopy])
+			n += toCopy
+			r.offset += toCopy
+
+			if n == len(p) {
+				return n, nil
+			}
+		} else {
+			r.offset = 0
+			r.currentFrame++
+			if isLastFrame {
 				r.eof = true
-				r.currentFrame++
 				return n, io.EOF
-			} else {
-				r.offset = 0
-				break
 			}
 		}
 	}

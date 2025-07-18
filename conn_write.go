@@ -112,7 +112,6 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		if !ok {
 			return Fatal(ErrChannelClosed)
 		}
-		fmt.Println(err)
 		return err
 	case <-ctx.Done():
 		return ErrWriteChanFull
