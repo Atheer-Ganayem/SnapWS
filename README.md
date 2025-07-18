@@ -29,7 +29,7 @@ A lightweight WebSocket library for Go, designed to make working with WebSockets
 go get github.com/yourusername/snapws
 ```
 
-## Basic echo example
+### Basic echo example
 
 ```go
 package main
@@ -61,8 +61,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
-	// hoverever, defering conn.Close() is the best practice just in case it stay open.
 	defer conn.Close()
 
 	for {
