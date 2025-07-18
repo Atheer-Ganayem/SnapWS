@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -10,76 +9,53 @@ import (
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
+var manager *snapws.Manager[string]
+
 func main() {
-	manager := snapws.NewManager(&snapws.Args[string]{
-		PingEvery:       time.Second * 5,
-		ReadWait:        time.Second * 10,
-		WriteBufferSize: 1024,
+	manager = snapws.NewManager(&snapws.Args[string]{
+		PingEvery:      time.Second * 25,
+		ReadWait:       time.Second * 30,
+		MaxMessageSize: snapws.DefaultReadBufferSize * 2,
 	})
-	manager.Use(func(w http.ResponseWriter, r *http.Request) error {
-		if r.URL.Query().Get("auth") != "123" {
-			return errors.New("not auth")
-		}
-		fmt.Println("middleware1")
-		return nil
-	})
-	manager.Use(func(w http.ResponseWriter, r *http.Request) error {
-		fmt.Println("middleware2")
-		return nil
-	})
-	manager.OnConnect = func(id string, conn *snapws.Conn[string]) {
-		fmt.Printf("User %s has been connected\n", id)
-	}
-	manager.OnDisconnect = func(id string, conn *snapws.Conn[string]) {
-		fmt.Printf("User %s has been disconnected\n", id)
-	}
 	defer manager.Shutdown()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := manager.Connect(r.RemoteAddr, w, r)
-		if err != nil {
-			handleHandshakeErr(w, err)
-			return
-		}
-		// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
-		// hoverever, defering conn.Close() is the best practice just in case it stay open.
-		defer conn.Close()
+	http.HandleFunc("/", handler)
 
-		for {
-			msg, err := conn.ReadString(context.TODO())
-			fmt.Println(msg)
-			if snapws.IsFatalErr(err) {
-				fmt.Println(err)
-				return
-			} else if err != nil {
-				fmt.Println("received wrong type of message.")
-				continue
-			}
-
-			if msg != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				//
-				err = conn.SendString(ctx, fmt.Sprintf("Received: %s", msg))
-				if err != nil {
-					fmt.Println(err)
-				}
-			}
-		}
-	})
-	fmt.Println("Server listenning")
+	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
 
-func handleHandshakeErr(w http.ResponseWriter, err error) {
-	if hErr, ok := snapws.AsHttpErr(err); ok {
-		if hErr.IsJson {
-			w.Header().Add("Content-Type", "application/json")
-		}
-		w.WriteHeader(hErr.Code)
-		w.Write([]byte(hErr.Message))
-	} else {
+func handler(w http.ResponseWriter, r *http.Request) {
+	conn, err := manager.Connect(r.RemoteAddr, w, r)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
+		return
+	}
+	// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
+	// hoverever, defering conn.Close() is the best practice just in case it stay open.
+	defer conn.Close()
+
+	for {
+		msgType, data, err := conn.ReadMessage(context.TODO())
+		if snapws.IsFatalErr(err) {
+			return // Connection closed
+		} else if err != nil {
+			fmt.Println("Non-fatal error:", err)
+			continue
+		}
+
+		switch msgType {
+		case snapws.OpcodeText:
+			err = conn.SendString(context.TODO(), string(data))
+		case snapws.OpcodeBinary:
+			err = conn.SendBytes(context.TODO(), data)
+		}
+		if snapws.IsFatalErr(err) {
+			return // Connection closed
+		} else if err != nil {
+			fmt.Println("Non-fatal error:", err)
+			continue
+		}
 	}
 }

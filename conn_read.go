@@ -7,23 +7,21 @@ import (
 	"fmt"
 	"io"
 	"time"
-
-	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 // ConnReader provides an io.Reader interface over a websocket message (frame group).
 // It supports reading fragmented frames as a single continuous stream.
 type ConnReader struct {
-	frames       internal.FrameGroup // Group of frames making up the complete message
-	currentFrame int                 // Index of the current frame being read
-	offset       int                 // Offset into the current frame's payload
-	eof          bool                // Indicates if all frames have been fully read
+	frames       FrameGroup // Group of frames making up the complete message
+	currentFrame int        // Index of the current frame being read
+	offset       int        // Offset into the current frame's payload
+	eof          bool       // Indicates if all frames have been fully read
 }
 
 func (conn *Conn[KeyType]) readLoop() {
 	for {
 		frame, code, err := conn.acceptFrame()
-		if code == internal.CloseNormalClosure && frame != nil {
+		if code == CloseNormalClosure && frame != nil {
 			conn.closeWithPayload(frame.Payload)
 			return
 		} else if err != nil {
@@ -34,7 +32,7 @@ func (conn *Conn[KeyType]) readLoop() {
 		select {
 		case conn.inboundFrames <- frame:
 		default:
-			conn.closeWithCode(internal.ClosePolicyViolation, "inboundFrames full — slow consumer")
+			conn.closeWithCode(ClosePolicyViolation, "inboundFrames full — slow consumer")
 			return
 		}
 	}
@@ -43,57 +41,57 @@ func (conn *Conn[KeyType]) readLoop() {
 // acceptFrame reads and parses a single WebSocket frame.
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
-func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
+func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 	buf := make([]byte, conn.Manager.ReadBufferSize)
 	var data bytes.Buffer
 
 	for {
 		n, err := conn.raw.Read(buf)
 		if err != nil && err != io.EOF {
-			return nil, internal.CloseProtocolError, err
+			return nil, CloseProtocolError, err
 		}
 		if data.Len()+n > conn.Manager.MaxMessageSize {
-			return nil, internal.CloseMessageTooBig, ErrMessageTooLarge
+			return nil, CloseMessageTooBig, ErrMessageTooLarge
 		}
 		if n > 0 {
 			_, err = data.Write(buf[:n])
 			if err != nil {
-				return nil, internal.CloseInternalServerErr, err
+				return nil, CloseInternalServerErr, err
 			}
 		}
 
-		ok, fErr := internal.IsCompleteFrame(data.Bytes())
+		ok, fErr := IsCompleteFrame(data.Bytes())
 		if fErr != nil {
-			return nil, internal.CloseProtocolError, fErr
+			return nil, CloseProtocolError, fErr
 		}
 		if ok {
 			break
 		}
 		if !ok && err == io.EOF {
-			return nil, internal.CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
+			return nil, CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
 		}
 	}
 
-	frame, err := internal.ReadFrame(data.Bytes())
+	frame, err := ReadFrame(data.Bytes())
 	if err != nil {
-		return nil, internal.CloseProtocolError, err
+		return nil, CloseProtocolError, err
 	} else if !frame.IsMasked {
-		return nil, internal.CloseProtocolError, errExpectedMaskedFrame
+		return nil, CloseProtocolError, errExpectedMaskedFrame
 	}
 
 	if frame.IsControl() {
 		if !frame.IsValidControl() {
-			return nil, internal.CloseProtocolError, ErrInvalidControlFrame
+			return nil, CloseProtocolError, ErrInvalidControlFrame
 		}
 		switch frame.OPCODE {
-		case internal.OpcodeClose:
-			return &frame, internal.CloseNormalClosure, io.EOF
+		case OpcodeClose:
+			return &frame, CloseNormalClosure, io.EOF
 
-		case internal.OpcodePing:
+		case OpcodePing:
 			conn.Pong(frame.Payload)
 			return conn.acceptFrame()
 
-		case internal.OpcodePong:
+		case OpcodePong:
 			conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
 			return conn.acceptFrame()
 		}
@@ -109,19 +107,19 @@ func (conn *Conn[KeyType]) acceptFrame() (*internal.Frame, uint16, error) {
 func (conn *Conn[KeyType]) acceptMessage() {
 	for {
 		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
-			conn.closeWithCode(internal.ClosePolicyViolation, "failed to set a deadline")
+			conn.closeWithCode(ClosePolicyViolation, "failed to set a deadline")
 			return
 		}
 
-		frames := make(internal.FrameGroup, 0, 1)
+		frames := make(FrameGroup, 0, 1)
 		frame, ok := <-conn.inboundFrames
 		if !ok {
 			return
 		}
 		frames = append(frames, frame)
 
-		if frame.OPCODE != internal.OpcodeText && frame.OPCODE != internal.OpcodeBinary {
-			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+		if frame.OPCODE != OpcodeText && frame.OPCODE != OpcodeBinary {
+			conn.closeWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 			return
 		}
 		if frame.FIN {
@@ -135,14 +133,14 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			if !ok {
 				return
 			}
-			if frame.OPCODE != internal.OpcodeContinuation {
-				conn.closeWithCode(internal.CloseProtocolError, ErrInvalidOPCODE.Error())
+			if frame.OPCODE != OpcodeContinuation {
+				conn.closeWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 				return
 			}
 
 			totalSize += len(frame.Payload)
 			if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
-				conn.closeWithCode(internal.CloseMessageTooBig, ErrMessageTooLarge.Error())
+				conn.closeWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
 				return
 			}
 			frames = append(frames, frame)
@@ -152,7 +150,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 		}
 
 		if frames[0].IsText() && !frames.IsValidUTF8() {
-			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
+			conn.closeWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
 			return
 		}
 
@@ -266,7 +264,7 @@ func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err err
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return nil, err
-	} else if msgType != internal.OpcodeBinary {
+	} else if msgType != OpcodeBinary {
 		return nil, ErrMessageTypeMismatch
 	}
 
@@ -282,7 +280,7 @@ func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return "", err // Connection already close by acceptMessage()
-	} else if msgType != internal.OpcodeText {
+	} else if msgType != OpcodeText {
 		return "", ErrMessageTypeMismatch
 	}
 
@@ -302,7 +300,7 @@ func (conn *Conn[KeyType]) ReadJSON(ctx context.Context, v any) error {
 	if err != nil {
 		return err
 	}
-	if msgType != internal.OpcodeText {
+	if msgType != OpcodeText {
 		return ErrMessageTypeMismatch
 	}
 

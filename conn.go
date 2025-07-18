@@ -9,8 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 type Conn[KeyType comparable] struct {
@@ -24,12 +22,12 @@ type Conn[KeyType comparable] struct {
 	SubProtocol string
 
 	// reading channels
-	inboundFrames   chan *internal.Frame
-	inboundMessages chan internal.FrameGroup
+	inboundFrames   chan *Frame
+	inboundMessages chan FrameGroup
 
 	// writing channels
 
-	// used for sending a internal.FrameGroup, text or binary only.
+	// used for sending a FrameGroup, text or binary only.
 	outboundFrames chan *SendFrameRequest
 	wLock          chan struct{}
 	// used for sending outboundControl frames.
@@ -39,7 +37,7 @@ type Conn[KeyType comparable] struct {
 }
 
 type SendFrameRequest struct {
-	frame *internal.Frame
+	frame *Frame
 	errCh chan error
 	ctx   context.Context
 }
@@ -52,9 +50,9 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		SubProtocol: subProtocol,
 		ticker:      time.NewTicker(m.PingEvery),
 
-		inboundFrames:   make(chan *internal.Frame, 32),
+		inboundFrames:   make(chan *Frame, 32),
 		wLock:           make(chan struct{}, 1),
-		inboundMessages: make(chan internal.FrameGroup, 8),
+		inboundMessages: make(chan FrameGroup, 8),
 
 		outboundFrames:  make(chan *SendFrameRequest, 16),
 		outboundControl: make(chan *SendFrameRequest, 4),
@@ -124,7 +122,7 @@ func (conn *Conn[KeyType]) pingLoop() {
 		defer cancel()
 
 		if err := conn.Ping(ctx); err != nil {
-			conn.closeWithCode(internal.ClosePolicyViolation, "failed to ping")
+			conn.closeWithCode(ClosePolicyViolation, "failed to ping")
 			return
 		}
 	}
@@ -137,7 +135,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		buf.WriteString(reason)
 		payload := buf.Bytes()
 
-		frame, err := internal.NewFrame(true, internal.OpcodeClose, false, payload)
+		frame, err := NewFrame(true, OpcodeClose, false, payload)
 
 		errCh := make(chan error)
 		if err == nil && !conn.isClosed.Load() {
@@ -171,21 +169,21 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 // Used to trigger closeWithCode with the code and reason parsed from payload.
 // The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
 // The rest of the payload is optional, represnting a UTF-8 reason.
-// Any violations would cause a close with internal.CloseProtocolError with the apropiate reason.
+// Any violations would cause a close with CloseProtocolError with the apropiate reason.
 func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
 	if len(payload) < 2 {
-		conn.closeWithCode(internal.CloseProtocolError, "invalid close frame payload")
+		conn.closeWithCode(CloseProtocolError, "invalid close frame payload")
 		return
 	}
 	code := binary.BigEndian.Uint16(payload[:2])
-	if !internal.IsValidCloseCode(code) {
-		conn.closeWithCode(internal.CloseProtocolError, "invalid close code")
+	if !IsValidCloseCode(code) {
+		conn.closeWithCode(CloseProtocolError, "invalid close code")
 		return
 	}
 
 	if len(payload) > 2 {
 		if !utf8.Valid(payload[2:]) {
-			conn.closeWithCode(internal.CloseProtocolError, ErrInvalidUTF8.Error())
+			conn.closeWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
 			return
 		}
 		conn.closeWithCode(code, string(payload[2:]))
@@ -196,5 +194,5 @@ func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
 
 // Closes the conn normaly.
 func (conn *Conn[KeyType]) Close() {
-	conn.closeWithCode(internal.CloseNormalClosure, "Normal close")
+	conn.closeWithCode(CloseNormalClosure, "Normal close")
 }

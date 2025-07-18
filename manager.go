@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
-
-	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 type Manager[KeyType comparable] struct {
@@ -143,7 +141,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 		ctx = context.TODO()
 	}
 
-	if opcode != internal.OpcodeText && opcode != internal.OpcodeBinary {
+	if opcode != OpcodeText && opcode != OpcodeBinary {
 		return 0, ErrInvalidOPCODE
 	}
 
@@ -178,7 +176,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 					return
 				}
 				var err error
-				if opcode == internal.OpcodeText {
+				if opcode == OpcodeText {
 					err = conn.SendString(ctx, string(data))
 				} else {
 					err = conn.SendBytes(ctx, data)
@@ -222,7 +220,7 @@ func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType,
 	if !utf8.ValidString(data) {
 		return 0, ErrInvalidUTF8
 	}
-	return m.broadcast(ctx, exclude, internal.OpcodeText, []byte(data))
+	return m.broadcast(ctx, exclude, OpcodeText, []byte(data))
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".
@@ -235,7 +233,7 @@ func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, 
 		return 0, ErrEmptyPayload
 	}
 
-	return m.broadcast(ctx, exclude, internal.OpcodeBinary, data)
+	return m.broadcast(ctx, exclude, OpcodeBinary, data)
 }
 
 func (m *Manager[KeyType]) Shutdown() {

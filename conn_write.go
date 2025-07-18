@@ -6,8 +6,6 @@ import (
 	"io"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Atheer-Ganayem/SnapWS/internal"
 )
 
 type ConnWriter[KeyType comparable] struct {
@@ -27,11 +25,11 @@ func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
 	}
 }
 
-func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (io.WriteCloser, error) {
+func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter[KeyType], error) {
 	if conn.isClosed.Load() {
 		return nil, Fatal(ErrConnClosed)
 	}
-	if msgType != internal.OpcodeText && msgType != internal.OpcodeBinary {
+	if msgType != OpcodeText && msgType != OpcodeBinary {
 		return nil, ErrInvalidOPCODE
 	}
 	if ctx == nil {
@@ -82,10 +80,10 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 
 	opcdoe := w.opcode
 	if w.flushCount > 0 {
-		opcdoe = internal.OpcodeContinuation
+		opcdoe = OpcodeContinuation
 	}
 
-	frame, err := internal.NewFrame(FIN, opcdoe, false, w.buf[:w.used])
+	frame, err := NewFrame(FIN, opcdoe, false, w.buf[:w.used])
 	if err != nil {
 		return err
 	}
@@ -145,7 +143,7 @@ func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 
 // Low level writing, not safe to use concurrently.
 // Use SendString, SendJSON, SendBytes for safe writing.
-func (conn *Conn[KeyType]) writeFrame(frame *internal.Frame) (err error) {
+func (conn *Conn[KeyType]) writeFrame(frame *Frame) (err error) {
 	err = conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
 		return Fatal(err)
@@ -171,7 +169,7 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 		return ErrEmptyPayload
 	}
 
-	w, err := conn.NextWriter(ctx, internal.OpcodeBinary)
+	w, err := conn.NextWriter(ctx, OpcodeBinary)
 	if err != nil {
 		return err
 	}
@@ -202,7 +200,7 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 		return ErrInvalidUTF8
 	}
 
-	w, err := conn.NextWriter(ctx, internal.OpcodeText)
+	w, err := conn.NextWriter(ctx, OpcodeText)
 	if err != nil {
 		return err
 	}
@@ -227,7 +225,7 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 		return ErrEmptyPayload
 	}
 
-	w, err := conn.NextWriter(ctx, internal.OpcodeText)
+	w, err := conn.NextWriter(ctx, OpcodeText)
 	if err != nil {
 		return err
 	}
@@ -249,7 +247,7 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 		return Fatal(ErrConnClosed)
 	}
 
-	frame, err := internal.NewFrame(true, internal.OpcodePing, false, []byte("test"))
+	frame, err := NewFrame(true, OpcodePing, false, []byte("test"))
 	if err != nil {
 		return err
 	}
@@ -278,9 +276,9 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 		return
 	}
 
-	frame, err := internal.NewFrame(true, internal.OpcodePong, false, payload)
+	frame, err := NewFrame(true, OpcodePong, false, payload)
 	if err != nil {
-		conn.closeWithCode(internal.CloseInternalServerErr, "faild to create pong frame")
+		conn.closeWithCode(CloseInternalServerErr, "faild to create pong frame")
 		return
 	}
 
@@ -290,18 +288,18 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 
 	select {
 	case <-ctx.Done():
-		conn.closeWithCode(internal.ClosePolicyViolation, "pong enqueue timeout")
+		conn.closeWithCode(ClosePolicyViolation, "pong enqueue timeout")
 		return
 	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: ctx}:
 	}
 
 	select {
 	case <-ctx.Done():
-		conn.closeWithCode(internal.ClosePolicyViolation, "pong enqueue timeout")
+		conn.closeWithCode(ClosePolicyViolation, "pong enqueue timeout")
 		return
 	case err = <-errCh:
 		if err != nil {
-			conn.closeWithCode(internal.ClosePolicyViolation, "pong failed: "+err.Error())
+			conn.closeWithCode(ClosePolicyViolation, "pong failed: "+err.Error())
 			return
 		}
 	}
