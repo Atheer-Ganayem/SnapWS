@@ -21,6 +21,11 @@ func main() {
 	manager.OnDisconnect = func(id string, conn *snapws.Conn[string]) {
 		fmt.Printf("User %s has been disconnected\n", id)
 	}
+	go func() {
+		time.Sleep(time.Second * 10)
+		manager.Shutdown()
+		fmt.Println(manager.GetAllConns())
+	}()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := manager.Connect(r.RemoteAddr, w, r)

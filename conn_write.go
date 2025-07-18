@@ -3,7 +3,6 @@ package snapws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"time"
 	"unicode/utf8"
@@ -152,9 +151,6 @@ func (conn *Conn[KeyType]) writeFrame(frame *internal.Frame) (err error) {
 		return Fatal(err)
 	}
 
-	if frame.OPCODE != internal.OpcodePing {
-		fmt.Printf("Writing frame %v: %s\n", frame.OPCODE, frame.Payload)
-	}
 	_, err = conn.raw.Write(frame.Bytes())
 	if err != nil {
 		return Fatal(err)

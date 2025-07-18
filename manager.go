@@ -105,7 +105,7 @@ func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 
 func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 	m.Mu.RLock()
-	defer m.Mu.Unlock()
+	defer m.Mu.RUnlock()
 
 	conns := make([]*Conn[KeyType], 0, len(m.Conns))
 	for _, v := range m.Conns {
@@ -116,7 +116,7 @@ func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 
 func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyType] {
 	m.Mu.RLock()
-	defer m.Mu.Unlock()
+	defer m.Mu.RUnlock()
 
 	conns := make([]*Conn[KeyType], 0, len(m.Conns))
 	var n int
@@ -126,7 +126,7 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyTy
 			n++
 		}
 	}
-	return conns[:n]
+	return conns
 }
 
 // broadcast sends a message to all active connections.
@@ -232,4 +232,32 @@ func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, 
 	}
 
 	return m.broadcast(ctx, exclude, internal.OpcodeBinary, data)
+}
+
+func (m *Manager[KeyType]) Shutdown() {
+	workers := (len(m.Conns) / 10) + 2
+	var wg sync.WaitGroup
+	ch := make(chan *Conn[KeyType], workers)
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			for conn := range ch {
+				conn.Close()
+			}
+			wg.Done()
+		}()
+	}
+
+	conns := m.GetAllConns()
+	for _, conn := range conns {
+		ch <- conn
+	}
+	close(ch)
+	wg.Wait()
+
+	m.Mu.Lock()
+	m.Conns = make(map[KeyType]*Conn[KeyType])
+	m.Mu.Unlock()
+
 }
