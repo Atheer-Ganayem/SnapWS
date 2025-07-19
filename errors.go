@@ -47,6 +47,7 @@ var (
 	ErrInvalidControlFrame     = errors.New("invalid control frame")
 	errExpectedMaskedFrame     = errors.New("received unmasked frame, all frames from the client must be masked")
 	ErrMessageTooLarge         = errors.New("message received from client was too large")
+	ErrTooMuchFragments        = errors.New("receive too much fragments for a signle message")
 	ErrInvalidUTF8             = errors.New("invalid utf8 data")
 	// ErrMessageTypeMismatch is returned when the received WebSocket message type
 	// does not match the expected type (e.g., expecting text but received binary).

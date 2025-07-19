@@ -142,6 +142,9 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
 				conn.closeWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
 				return
+			} else if conn.Manager.ReaderMaxFragments > 0 && len(frames) > conn.Manager.ReaderMaxFragments {
+				conn.closeWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
+				return
 			}
 			frames = append(frames, frame)
 			if frame.FIN {

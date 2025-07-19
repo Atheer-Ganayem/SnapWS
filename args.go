@@ -44,10 +44,14 @@ type Args[KeyType comparable] struct {
 	// -1 means there is no max size.
 	// PLEASE DONT USER -1 UNLESS YOU KNOW WHAT YOU ARE DOING
 	MaxMessageSize int
+	// maximum fragremnt allowed per an incoming message.
+	// if not set it will default to 0, which means there is no limit.
+	ReaderMaxFragments int
 	// if not set it will default to 4096 bytes
 	ReadBufferSize int
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
+	//
 
 	// the size of iboundFrames chan buffer, if not set it will default to 32
 	InboundFramesSize int
