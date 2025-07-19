@@ -59,6 +59,9 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 	}
 }
 
+// Locks "wLock" indicating that a writer has been intiated.
+// It tires to aquire the lock, if the provided context is done before
+// succeeding to aquiring the lock, it return an error.
 func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 	select {
 	case conn.wLock <- struct{}{}:
@@ -68,18 +71,25 @@ func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 	}
 }
 
-func (conn *Conn[KeyType]) unlockW(ctx context.Context) error {
+// Unlocks "wLock", indicating that the writer has finished.
+// Returns a snapws.FatalError if the connection is closed.
+// Returns nil if unlocking succeeds or if it was already unlocked.
+func (conn *Conn[KeyType]) unlockW() error {
 	select {
 	case _, ok := <-conn.wLock:
 		if !ok {
 			return Fatal(ErrChannelClosed)
 		}
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	default:
+		// already unlocked
+		return nil
 	}
 }
 
+// A loop that runs as long as the connection is alive.
+// Listens for outgoing frames.
+// It gives priotiry to control frames.
 func (conn *Conn[KeyType]) listen() {
 	for {
 		select {
@@ -116,6 +126,9 @@ func (conn *Conn[KeyType]) listen() {
 	}
 }
 
+// A loop that runs as long as the connection is alive.
+// Ping the client every "PingEvery" provided from the manager.
+// If pinging fails the connection closes.
 func (conn *Conn[KeyType]) pingLoop() {
 	for range conn.ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), conn.Manager.WriteWait)
@@ -129,6 +142,7 @@ func (conn *Conn[KeyType]) pingLoop() {
 
 }
 
+// closeWithCode closes the connection with the given code and reason.
 func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
 		buf := new(bytes.Buffer)
@@ -163,6 +177,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		close(conn.outboundControl)
 		close(conn.inboundMessages)
 		close(conn.inboundFrames)
+		close(conn.wLock)
 		conn.Manager.unregister(conn.Key)
 	})
 }

@@ -40,8 +40,6 @@ func donwloadHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
-	// hoverever, defering conn.Close() is the best practice just in case it stay open.
 	defer conn.Close()
 
 	file, err := os.Open("cmd/examples/file-streaming/lorem.txt")
@@ -95,7 +93,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil || msgType != snapws.OpcodeBinary {
 		return
 	}
-//68656c6c6f20776f726c6464
+
 	written := 0
 	buf := make([]byte, manager.ReadBufferSize)
 	for {

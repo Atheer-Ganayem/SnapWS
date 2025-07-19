@@ -17,6 +17,7 @@ type ConnWriter[KeyType comparable] struct {
 	flushCount int
 }
 
+// NewWriter creates a new buffered writer for the given opcode (text or binary).
 func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
 	return &ConnWriter[KeyType]{
 		conn:   conn,
@@ -25,6 +26,8 @@ func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
 	}
 }
 
+// NextWriter locks the write stream and returns a new writer for the given message type.
+// Must call Close() on the returned writer to release the lock.
 func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter[KeyType], error) {
 	if conn.isClosed.Load() {
 		return nil, Fatal(ErrConnClosed)
@@ -44,6 +47,8 @@ func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*Conn
 	return conn.NewWriter(msgType), nil
 }
 
+// Write appends bytes to the writer buffer and flushes if full.
+// Automatically handles splitting into multiple frames.
 func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 	if w.closed {
 		return 0, ErrWriterClosed
@@ -69,6 +74,8 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
+// Flush sends the current buffer as a WebSocket frame.
+// If FIN is true, marks this as the final frame in the message.
 func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	if w.closed {
 		return ErrWriterClosed
@@ -115,8 +122,9 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	}
 }
 
+// Close flushes the final frame and releases the writer lock.
 func (w *ConnWriter[KeyType]) Close() error {
-	defer w.conn.unlockW(context.TODO())
+	defer w.conn.unlockW()
 	err := w.Flush(true)
 	w.closed = true
 	return err
@@ -131,6 +139,8 @@ func trySendErr(errCh chan error, err error) {
 	}
 }
 
+// sendFrame writes a prepared frame to the underlying connection.
+// Used internally to send frames from the outbound queue.
 func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
 	if req.ctx != nil && req.ctx.Err() != nil {
 		trySendErr(req.errCh, req.ctx.Err())
@@ -162,8 +172,9 @@ func (conn *Conn[KeyType]) writeFrame(frame *Frame) (err error) {
 // The payload must be non-empty. If not, the method returns snapws.ErrEmptyPayload.
 // The message will be split into fragments if needed based on WriteBufferSize.
 //
-// All errors except snapws.ErrEmptyPayload are of type snapws.FatalError,
-// indicating that the connection was closed due to an I/O or protocol error.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 	if len(b) == 0 {
 		return ErrEmptyPayload
@@ -188,9 +199,9 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 // snapws.ErrEmptyPayload or snapws.ErrInvalidUTF8. The message will be split
 // into fragments if necessary based on WriteBufferSize.
 //
-// All returned errors except for the above are of type snapws.FatalError,
-// indicating an I/O failure or protocol error. These errors will automatically
-// close the connection.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 	if str == "" {
 		return ErrEmptyPayload
@@ -218,8 +229,9 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 // The value must not be nil. If marshaling fails, the method returns the original
 // marshaling error. The message will be split into fragments if necessary.
 //
-// All errors other than marshaling are of type snapws.FatalError, meaning the connection
-// has been closed due to a protocol or I/O failure.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 	if v == nil {
 		return ErrEmptyPayload
@@ -238,6 +250,9 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 	return w.Close()
 }
 
+// Ping sends a WebSocket ping frame and waits for it to be sent.
+// Ping\Pong frames are already handeled by the library, you dont need
+// to habdle them manually.
 func (conn *Conn[Key]) Ping(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -271,6 +286,10 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 	}
 }
 
+// Pong sends a pong control frame in response to a ping.
+// Automatically closes the connection on failure.
+// Ping\Pong frames are already handeled by the library, you dont need
+// to habdle them manually.
 func (conn *Conn[KeyType]) Pong(payload []byte) {
 	if conn.isClosed.Load() {
 		return

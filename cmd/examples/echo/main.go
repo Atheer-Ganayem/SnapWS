@@ -32,8 +32,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	// all read errors close the connection exepet ErrMessageTypeMismatch (you have the option to close it or not).
-	// hoverever, defering conn.Close() is the best practice just in case it stay open.
 	defer conn.Close()
 
 	for {
