@@ -3,7 +3,6 @@ package snapws
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"time"
 	"unicode/utf8"
 )
@@ -202,12 +201,12 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
-	if str == "" {
+func (conn *Conn[KeyType]) SendString(ctx context.Context, data []byte) error {
+	if len(data) == 0 {
 		return ErrEmptyPayload
 	}
 
-	if ok := utf8.ValidString(str); !ok {
+	if ok := utf8.Valid(data); !ok {
 		return ErrInvalidUTF8
 	}
 
@@ -216,7 +215,7 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, str string) error {
 		return err
 	}
 
-	_, err = io.WriteString(w, str)
+	_, err = w.Write(data)
 	if err != nil {
 		return err
 	}

@@ -46,7 +46,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 		// Broadcast message to all except sender
 		msg := fmt.Sprintf("%s: %s", name, data)
-		_, err = manager.BroadcastString(context.TODO(), conn.Key, msg)
+		_, err = manager.BroadcastString(context.TODO(), conn.Key, []byte(msg))
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -67,10 +67,10 @@ func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 }
 
 func onConnect(id string, conn *snapws.Conn[string]) {
-	manager.BroadcastString(context.TODO(), id, id+" connected")
+	manager.BroadcastString(context.TODO(), id, []byte(id+" connected"))
 }
 func onDisconnect(id string, conn *snapws.Conn[string]) {
-	conn.Manager.BroadcastString(context.TODO(), id, id+" disconnected")
+	conn.Manager.BroadcastString(context.TODO(), id, []byte(id+" disconnected"))
 }
 
 func handleHandshakeErr(w http.ResponseWriter, err error) {

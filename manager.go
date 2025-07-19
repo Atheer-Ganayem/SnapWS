@@ -177,7 +177,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 				}
 				var err error
 				if opcode == OpcodeText {
-					err = conn.SendString(ctx, string(data))
+					err = conn.SendString(ctx, data)
 				} else {
 					err = conn.SendBytes(ctx, data)
 				}
@@ -213,14 +213,14 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 // you can set it as a zero value of your KeyType).
 // data must be a non-empty valid UTF-8 string, otherwise an error will be returned.
 // It returns "n" the number of successfull writes, and an error.
-func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data string) (int, error) {
+func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data []byte) (int, error) {
 	if len(data) <= 0 {
 		return 0, ErrEmptyPayload
 	}
-	if !utf8.ValidString(data) {
+	if !utf8.Valid(data) {
 		return 0, ErrInvalidUTF8
 	}
-	return m.broadcast(ctx, exclude, OpcodeText, []byte(data))
+	return m.broadcast(ctx, exclude, OpcodeText, data)
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".

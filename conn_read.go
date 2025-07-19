@@ -274,22 +274,22 @@ func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err err
 	return payload, nil
 }
 
-// ReadString returns the message payload as a UTF-8 string from a text WebSocket message.
+// ReadString returns the message payload as a UTF-8 byte slice from a text WebSocket message.
 //
 // If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
 // without closing the connection.
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
+func (conn *Conn[KeyType]) ReadString(ctx context.Context) ([]byte, error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
-		return "", err // Connection already close by acceptMessage()
+		return nil, err // Connection already close by acceptMessage()
 	} else if msgType != OpcodeText {
-		return "", ErrMessageTypeMismatch
+		return nil, ErrMessageTypeMismatch
 	}
 
-	return string(payload), nil
+	return payload, nil
 }
 
 // ReadJSON reads a text WebSocket message and unmarshals its payload into the given value.

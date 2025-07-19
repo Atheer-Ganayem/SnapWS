@@ -35,7 +35,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		msgType, data, err := conn.ReadMessage(context.TODO())
+		data, err := conn.ReadString(context.TODO())
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -43,12 +43,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		switch msgType {
-		case snapws.OpcodeText:
-			err = conn.SendString(context.TODO(), string(data))
-		case snapws.OpcodeBinary:
-			err = conn.SendBytes(context.TODO(), data)
-		}
+		err = conn.SendString(context.TODO(), data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
