@@ -1,5 +1,4 @@
 # snapws
-
 ![Go Version](https://img.shields.io/badge/go-%3E=1.18-blue)
 ![License](https://img.shields.io/github/license/yourusername/snapws)
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
@@ -10,8 +9,8 @@ A lightweight WebSocket library for Go, designed to make working with WebSockets
 > This library is not yet production-ready. Expect breaking changes as development continues.
 
 > 🧠 **Why?**  
-> Using [gorilla/websocket](https://github.com/gorilla/websocket) often felt like overkill. You had to write a lot of code, worry about race conditions, manually handle timeouts, and understand the WebSocket protocol more deeply than necessary.
->
+> Using [gorilla/websocket](https://github.com/gorilla/websocket) often felt like overkill. You had to write a lot of code, worry about race conditions, manually handle timeouts, and understand the WebSocket protocol more deeply than necessary.  
+>  
 > `snapws` handles the boring stuff for you — so you can **just send and receive messages**.
 
 ---
@@ -91,7 +90,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 ```
-
 ## API Reference
 
 ### 📦 Manager
