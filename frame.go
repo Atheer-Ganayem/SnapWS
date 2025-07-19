@@ -244,7 +244,7 @@ func (f *Frame) Bytes() []byte {
 		b[1] |= 0x80
 	}
 
-	if f.PayloadLength < 126 && f.PayloadLength > 0 {
+	if f.PayloadLength < 126 && f.PayloadLength >= 0 {
 		b[1] += byte(f.PayloadLength)
 	} else if f.PayloadLength <= math.MaxUint16 {
 		b[1] += 126

@@ -150,7 +150,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 				conn.closeWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
 				return
 			}
-			message.Payload.Write(frame.Payload)
+			_, err = message.Payload.Write(frame.Payload)
 			if err != nil {
 				return
 			}
