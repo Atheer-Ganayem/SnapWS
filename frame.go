@@ -1,6 +1,7 @@
 package snapws
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -42,7 +43,10 @@ type Frame struct {
 	Payload       []byte
 }
 
-type FrameGroup []*Frame
+type Message struct {
+	OPCODE  uint8
+	Payload *bytes.Buffer
+}
 
 func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, error) {
 	frame := Frame{
@@ -120,40 +124,16 @@ func (frame *Frame) IsValidControl() bool {
 	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
 }
 
-func (frames FrameGroup) Payload() []byte {
-	if len(frames) < 1 {
-		return nil
-	}
-
-	length := 0
-	for _, frame := range frames {
-		length += frame.PayloadLength
-	}
-
-	payload := make([]byte, 0, length)
-	for _, frame := range frames {
-		payload = append(payload, frame.Payload...)
-	}
-
-	return payload
+func (message *Message) IsValidUTF8() bool {
+	return utf8.Valid(message.Payload.Bytes())
 }
 
-func (frames FrameGroup) IsValidUTF8() bool {
-	return utf8.Valid(frames.Payload())
+func (message *Message) IsBinary() bool {
+	return message.OPCODE == OpcodeBinary
 }
 
-func (frames FrameGroup) IsBinary() bool {
-	if len(frames) == 0 {
-		return false
-	}
-	return frames[0].OPCODE == OpcodeBinary
-}
-
-func (frames FrameGroup) IsText() bool {
-	if len(frames) == 0 {
-		return false
-	}
-	return frames[0].IsText()
+func (message *Message) IsText() bool {
+	return message.OPCODE == OpcodeText
 }
 
 func IsValidCloseCode(code uint16) bool {

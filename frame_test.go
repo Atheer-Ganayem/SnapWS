@@ -39,25 +39,6 @@ func TestIsCompleteFrame_FullSmallFrame(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestFrameGroup_Payload(t *testing.T) {
-	f1 := &Frame{Payload: []byte("Hello, "), PayloadLength: 7}
-	f2 := &Frame{Payload: []byte("world!"), PayloadLength: 6}
-	group := FrameGroup{f1, f2}
-
-	assert.Equal(t, []byte("Hello, world!"), group.Payload())
-}
-
-func TestFrameGroup_UTF8Validation(t *testing.T) {
-	valid := FrameGroup{
-		&Frame{Payload: []byte("valid UTF-8"), PayloadLength: 11},
-	}
-	invalid := FrameGroup{
-		&Frame{Payload: []byte{0xff, 0xfe, 0xfd}, PayloadLength: 3},
-	}
-	assert.True(t, valid.IsValidUTF8())
-	assert.False(t, invalid.IsValidUTF8())
-}
-
 func TestIsValidCloseCode(t *testing.T) {
 	assert.True(t, IsValidCloseCode(1000))
 	assert.False(t, IsValidCloseCode(999))

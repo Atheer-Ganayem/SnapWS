@@ -21,19 +21,16 @@ type Conn[KeyType comparable] struct {
 	// Empty string means its a raw websocket
 	SubProtocol string
 
-	// reading channels
 	inboundFrames   chan *Frame
-	inboundMessages chan FrameGroup
-
-	// writing channels
+	inboundMessages chan *Message
+	// ticker for ping loop
+	ticker *time.Ticker
 
 	// used for sending a FrameGroup, text or binary only.
 	outboundFrames chan *SendFrameRequest
 	wLock          chan struct{}
 	// used for sending outboundControl frames.
 	outboundControl chan *SendFrameRequest
-	// ticker for ping loop
-	ticker *time.Ticker
 }
 
 type SendFrameRequest struct {
@@ -51,7 +48,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		ticker:      time.NewTicker(m.PingEvery),
 
 		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
-		inboundMessages: make(chan FrameGroup, m.InboundMessagesSize),
+		inboundMessages: make(chan *Message, m.InboundMessagesSize),
 
 		wLock:           make(chan struct{}, 1),
 		outboundFrames:  make(chan *SendFrameRequest, m.OutboundFramesSize),

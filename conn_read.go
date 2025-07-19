@@ -12,10 +12,8 @@ import (
 // ConnReader provides an io.Reader interface over a websocket message (frame group).
 // It supports reading fragmented frames as a single continuous stream.
 type ConnReader struct {
-	frames       FrameGroup // Group of frames making up the complete message
-	currentFrame int        // Index of the current frame being read
-	offset       int        // Offset into the current frame's payload
-	eof          bool       // Indicates if all frames have been fully read
+	message *Message // Group of frames making up the complete message
+	eof     bool     // Indicates if all frames have been fully read
 }
 
 func (conn *Conn[KeyType]) readLoop() {
@@ -111,23 +109,29 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			return
 		}
 
-		frames := make(FrameGroup, 0, 1)
 		frame, ok := <-conn.inboundFrames
 		if !ok {
 			return
 		}
-		frames = append(frames, frame)
-
 		if frame.OPCODE != OpcodeText && frame.OPCODE != OpcodeBinary {
 			conn.closeWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 			return
 		}
+
+		message := &Message{OPCODE: frame.OPCODE}
 		if frame.FIN {
-			conn.inboundMessages <- frames
+			message.Payload = bytes.NewBuffer(frame.Payload)
+			conn.inboundMessages <- message
 			continue
 		}
+		message.Payload = bytes.NewBuffer(make([]byte, 0, conn.Manager.ReadBufferSize))
+		_, err := message.Payload.Write(frame.Payload)
+		if err != nil {
+			conn.closeWithCode(CloseInternalServerErr, ErrBufferWriteFaild.Error())
+			return
+		}
 
-		totalSize := len(frame.Payload)
+		frameCount := 1
 		for {
 			frame, ok := <-conn.inboundFrames
 			if !ok {
@@ -138,26 +142,30 @@ func (conn *Conn[KeyType]) acceptMessage() {
 				return
 			}
 
-			totalSize += len(frame.Payload)
-			if conn.Manager.MaxMessageSize != -1 && totalSize > conn.Manager.MaxMessageSize {
+			frameCount++
+			if conn.Manager.MaxMessageSize != -1 && message.Payload.Len()+frame.PayloadLength > conn.Manager.MaxMessageSize {
 				conn.closeWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
 				return
-			} else if conn.Manager.ReaderMaxFragments > 0 && len(frames) > conn.Manager.ReaderMaxFragments {
+			} else if conn.Manager.ReaderMaxFragments > 0 && frameCount > conn.Manager.ReaderMaxFragments {
 				conn.closeWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
 				return
 			}
-			frames = append(frames, frame)
+			message.Payload.Write(frame.Payload)
+			if err != nil {
+				return
+			}
+
 			if frame.FIN {
 				break
 			}
 		}
 
-		if frames[0].IsText() && !frames.IsValidUTF8() {
+		if message.IsText() && !message.IsValidUTF8() {
 			conn.closeWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
 			return
 		}
 
-		conn.inboundMessages <- frames
+		conn.inboundMessages <- message
 	}
 }
 
@@ -176,33 +184,17 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	for r.currentFrame < len(r.frames) {
-		frame := r.frames[r.currentFrame]
-		isLastFrame := r.currentFrame == len(r.frames)-1
-		payload := frame.Payload
-
-		if r.offset < len(payload) {
-			space := len(p) - n
-			remain := len(payload) - r.offset
-			toCopy := space
-			if remain < space {
-				toCopy = remain
+	for n < len(p) {
+		rn, err := r.message.Payload.Read(p[n:])
+		n += rn
+		if err == io.EOF {
+			r.eof = true
+			if n == 0 {
+				return 0, io.EOF
 			}
-
-			copy(p[n:], payload[r.offset:r.offset+toCopy])
-			n += toCopy
-			r.offset += toCopy
-
-			if n == len(p) {
-				return n, nil
-			}
-		} else {
-			r.offset = 0
-			r.currentFrame++
-			if isLastFrame {
-				r.eof = true
-				return n, io.EOF
-			}
+			return n, nil
+		} else if err != nil {
+			return n, err
 		}
 	}
 
@@ -222,12 +214,12 @@ func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, int8, err
 	select {
 	case <-ctx.Done():
 		return nil, -1, ctx.Err()
-	case frames, ok := <-conn.inboundMessages:
+	case message, ok := <-conn.inboundMessages:
 		if !ok {
 			return nil, -1, Fatal(ErrConnClosed)
 		}
 		// there is alway at least 1 element in inbound messages
-		return &ConnReader{frames: frames}, int8(frames[0].OPCODE), nil
+		return &ConnReader{message: message}, int8(message.OPCODE), nil
 	}
 }
 
