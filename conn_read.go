@@ -256,10 +256,10 @@ func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data 
 // ReadBinary returns the binary payload from a WebSocket binary message.
 //
 // If the received message is not of type binary, it returns snapws.ErrMessageTypeMismatch
-// without closing the connection. All other errors are of type snapws.FatalError, indicating a protocol
-// or I/O failure, and the connection will be closed automatically by acceptMessage.
-//
-// Note: This method returns the payload of a binary WebSocket message as a []byte slice.
+// without closing the connection.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
@@ -274,8 +274,10 @@ func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err err
 // ReadString returns the message payload as a UTF-8 string from a text WebSocket message.
 //
 // If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
-// without closing the connection. All other errors are of type snapws.FatalError, indicating a protocol
-// or I/O failure, and the connection will be closed automatically by acceptMessage.
+// without closing the connection.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
@@ -293,8 +295,9 @@ func (conn *Conn[KeyType]) ReadString(ctx context.Context) (string, error) {
 // If the message is not of type text, it returns snapws.ErrMessageTypeMismatch without
 // closing the connection. if the text is not a valid json, an error will be returned without
 // closing the connection.
-// All other errors are of type snapws.FatalError, indicating a protocol
-// or I/O failure, and the connection will be closed automatically by acceptMessage.
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) ReadJSON(ctx context.Context, v any) error {
 	reader, msgType, err := conn.NextReader(ctx)
 	if err != nil {
