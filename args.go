@@ -6,13 +6,20 @@ import (
 )
 
 const (
-	defaultWriteWait       = time.Second * 5
-	defaultReadWait        = time.Minute
-	defaultPingEvery       = time.Second * 50
-	defaultWriterTimeout   = time.Second * 5
+	defaultWriteWait     = time.Second * 5
+	defaultReadWait      = time.Minute
+	defaultPingEvery     = time.Second * 50
+	defaultWriterTimeout = time.Second * 5
+
 	DefaultMaxMessageSize  = 1 << 20 // 1MB
 	DefaultReadBufferSize  = 4096
 	DefaultWriteBufferSize = 4096
+
+	DefaultInboundFrames   = 32
+	DefaultInboundMessages = 8
+
+	DefaultOutboundFrames  = 16
+	DefaultOutboundControl = 4
 )
 
 type Args[KeyType comparable] struct {
@@ -41,6 +48,15 @@ type Args[KeyType comparable] struct {
 	ReadBufferSize int
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
+
+	// the size of iboundFrames chan buffer, if not set it will default to 32
+	InboundFramesSize int
+	// the size of iboundMessages chan buffer, if not set it will default to 8
+	InboundMessagesSize int
+	// the size of outboundFrames chan buffer, if not set it will default to 16
+	OutboundFramesSize int
+	// the size of outboundControl chan buffer, if not set it will default to 4
+	OutboundControlSize int
 
 	// subProtocols defines the list of supported WebSocket sub-protocols by the server.
 	// During the handshake, the server will select the first matching protocol from the
@@ -82,6 +98,19 @@ func (args *Args[KeyType]) WithDefault() {
 	}
 	if args.WriteBufferSize == 0 {
 		args.WriteBufferSize = DefaultWriteBufferSize
+	}
+
+	if args.InboundFramesSize == 0 {
+		args.InboundFramesSize = DefaultInboundFrames
+	}
+	if args.InboundMessagesSize == 0 {
+		args.InboundMessagesSize = DefaultInboundMessages
+	}
+	if args.OutboundFramesSize == 0 {
+		args.OutboundFramesSize = DefaultOutboundFrames
+	}
+	if args.OutboundControlSize == 0 {
+		args.OutboundControlSize = DefaultOutboundControl
 	}
 }
 

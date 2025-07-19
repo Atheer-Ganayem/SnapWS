@@ -50,12 +50,12 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		SubProtocol: subProtocol,
 		ticker:      time.NewTicker(m.PingEvery),
 
-		inboundFrames:   make(chan *Frame, 32),
-		wLock:           make(chan struct{}, 1),
-		inboundMessages: make(chan FrameGroup, 8),
+		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
+		inboundMessages: make(chan FrameGroup, m.InboundMessagesSize),
 
-		outboundFrames:  make(chan *SendFrameRequest, 16),
-		outboundControl: make(chan *SendFrameRequest, 4),
+		wLock:           make(chan struct{}, 1),
+		outboundFrames:  make(chan *SendFrameRequest, m.OutboundFramesSize),
+		outboundControl: make(chan *SendFrameRequest, m.OutboundControlSize),
 	}
 }
 
