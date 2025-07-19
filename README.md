@@ -107,4 +107,8 @@ It is designed to be shared across your application (typically as a singleton), 
 
 You can customize behavior via the `snapws.Args` struct when creating a new `Manager`, giving you fine-grained control over performance, memory usage, and connection behavior.
 
+<<<<<<< HEAD
 > Behind the scenes, `Manager` ensures that each client is tracked, cleaned up when disconnected, and integrated with your application logic via hooks and middleware.
+=======
+> Behind the scenes, `Manager` ensures that each client is tracked, cleaned up when disconnected, and integrated with your application logic via hooks and middleware.
+>>>>>>> 200a5a571dd6a371f419eeb3c042024d1602b2ab
