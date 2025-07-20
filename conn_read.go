@@ -54,6 +54,9 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 		}
 
 		length, err := readLength(buf[:offset])
+		if conn.Manager.MaxMessageSize != -1 && length > conn.Manager.MaxMessageSize {
+			return nil, CloseMessageTooBig, ErrTooLargePayload
+		}
 		if length == offset {
 			break
 		}

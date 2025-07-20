@@ -42,6 +42,7 @@ type Args[KeyType comparable] struct {
 
 	// This is the max size of message sent by the client. if not set it will default to 1MB
 	// -1 means there is no max size.
+	// Note: the size includes the frame/frames header/header and masking key/keys.
 	// PLEASE DONT USER -1 UNLESS YOU KNOW WHAT YOU ARE DOING
 	MaxMessageSize int
 	// maximum fragremnt allowed per an incoming message.

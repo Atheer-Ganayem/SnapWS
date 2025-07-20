@@ -13,9 +13,8 @@ var manager *snapws.Manager[string]
 
 func main() {
 	manager = snapws.NewManager(&snapws.Args[string]{
-		PingEvery:      time.Second * 25,
-		ReadWait:       time.Second * 30,
-		MaxMessageSize: snapws.DefaultReadBufferSize * 2,
+		PingEvery: time.Second * 25,
+		ReadWait:  time.Second * 30,
 	})
 	defer manager.Shutdown()
 
