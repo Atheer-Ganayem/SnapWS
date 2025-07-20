@@ -61,4 +61,6 @@ var (
 	ErrWriteChanFull    = errors.New("write channel is full, slow client, message dropped")
 	ErrWriterClosed     = errors.New("writer is closed")
 	ErrBufferWriteFaild = errors.New("writing to buffer faild")
+
+	ErrWriterNotClosed = errors.New("cannot get the next writer without closing the previous one")
 )

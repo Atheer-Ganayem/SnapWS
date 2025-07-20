@@ -26,11 +26,12 @@ type Conn[KeyType comparable] struct {
 	// ticker for ping loop
 	ticker *time.Ticker
 
-	// used for sending a FrameGroup, text or binary only.
+	// used for sending a Message frame, text or binary only.
 	outboundFrames chan *SendFrameRequest
-	wLock          chan struct{}
 	// used for sending outboundControl frames.
 	outboundControl chan *SendFrameRequest
+
+	writer *ConnWriter[KeyType]
 }
 
 type SendFrameRequest struct {
@@ -40,7 +41,7 @@ type SendFrameRequest struct {
 }
 
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
-	return &Conn[KeyType]{
+	conn := &Conn[KeyType]{
 		raw:         c,
 		Manager:     m,
 		Key:         key,
@@ -50,10 +51,12 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
 		inboundMessages: make(chan *Message, m.InboundMessagesSize),
 
-		wLock:           make(chan struct{}, 1),
 		outboundFrames:  make(chan *SendFrameRequest, m.OutboundFramesSize),
 		outboundControl: make(chan *SendFrameRequest, m.OutboundControlSize),
 	}
+
+	conn.writer = conn.newWriter(OpcodeText)
+	return conn
 }
 
 // Locks "wLock" indicating that a writer has been intiated.
@@ -61,7 +64,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 // succeeding to aquiring the lock, it return an error.
 func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 	select {
-	case conn.wLock <- struct{}{}:
+	case conn.writer.lock <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -73,7 +76,7 @@ func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 // Returns nil if unlocking succeeds or if it was already unlocked.
 func (conn *Conn[KeyType]) unlockW() error {
 	select {
-	case _, ok := <-conn.wLock:
+	case _, ok := <-conn.writer.lock:
 		if !ok {
 			return Fatal(ErrChannelClosed)
 		}
@@ -97,16 +100,19 @@ func (conn *Conn[KeyType]) listen() {
 				}
 				return
 			}
-			conn.sendFrame(req)
-
-		case req, ok := <-conn.outboundFrames:
 			if req == nil {
 				break
 			}
+			trySendErr(req.errCh, conn.sendFrame(req.frame))
+
+		case req, ok := <-conn.outboundFrames:
 			// checking if chan is closes
 			if !ok {
 				trySendErr(req.errCh, ErrChannelClosed)
 				return
+			}
+			if req == nil {
+				break
 			}
 			// checking if ctx is done
 			if req.ctx == nil {
@@ -118,7 +124,7 @@ func (conn *Conn[KeyType]) listen() {
 					break
 				}
 			}
-			conn.sendFrame(req)
+			trySendErr(req.errCh, conn.sendFrame(req.frame))
 		}
 	}
 }
@@ -174,7 +180,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		close(conn.outboundControl)
 		close(conn.inboundMessages)
 		close(conn.inboundFrames)
-		close(conn.wLock)
+		close(conn.writer.lock)
 		conn.Manager.unregister(conn.Key)
 	})
 }

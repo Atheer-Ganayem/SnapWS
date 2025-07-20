@@ -14,15 +14,30 @@ type ConnWriter[KeyType comparable] struct {
 	opcode     uint8
 	closed     bool
 	flushCount int
+	lock       chan struct{}
+	ctx        context.Context
 }
 
-// NewWriter creates a new buffered writer for the given opcode (text or binary).
-func (conn *Conn[KeyType]) NewWriter(opcode uint8) *ConnWriter[KeyType] {
+// newWriter is a constructor for conn.writer, only to be used once.
+// When request the next writer, reset(opcode uint8) should be the one to be called.
+func (conn *Conn[KeyType]) newWriter(opcode uint8) *ConnWriter[KeyType] {
 	return &ConnWriter[KeyType]{
 		conn:   conn,
 		buf:    make([]byte, conn.Manager.WriteBufferSize),
 		opcode: opcode,
+		lock:   make(chan struct{}, 1),
+		closed: true,
 	}
+}
+
+// resets the writer to prepare it for the next write.
+func (w *ConnWriter[KeyType]) reset(ctx context.Context, opcode uint8) {
+	clear(w.buf[:w.used])
+	w.used = 0
+	w.opcode = opcode
+	w.closed = false
+	w.flushCount = 0
+	w.ctx = ctx
 }
 
 // NextWriter locks the write stream and returns a new writer for the given message type.
@@ -37,13 +52,18 @@ func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*Conn
 	if ctx == nil {
 		ctx = context.TODO()
 	}
+	if !conn.writer.closed {
+		return nil, ErrWriterNotClosed
+	}
 
 	err := conn.lockW(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return conn.NewWriter(msgType), nil
+	conn.writer.reset(ctx, msgType)
+
+	return conn.writer, nil
 }
 
 // Write appends bytes to the writer buffer and flushes if full.
@@ -93,20 +113,21 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), w.conn.Manager.WriterTimeout)
-	defer cancel()
+	if w.ctx == nil {
+		w.ctx = context.TODO()
+	}
 	errCh := make(chan error)
 	req := &SendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
-		ctx:   ctx,
+		ctx:   w.ctx,
 	}
 
 	w.flushCount++
 	w.used = 0
 	select {
 	case w.conn.outboundFrames <- req:
-	case <-ctx.Done():
+	case <-w.ctx.Done():
 		return ErrWriteChanFull
 	}
 
@@ -116,7 +137,7 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 			return Fatal(ErrChannelClosed)
 		}
 		return err
-	case <-ctx.Done():
+	case <-w.ctx.Done():
 		return ErrWriteChanFull
 	}
 }
@@ -124,8 +145,8 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 // Close flushes the final frame and releases the writer lock.
 func (w *ConnWriter[KeyType]) Close() error {
 	defer w.conn.unlockW()
+	defer func() { w.closed = true }()
 	err := w.Flush(true)
-	w.closed = true
 	return err
 }
 
@@ -139,21 +160,9 @@ func trySendErr(errCh chan error, err error) {
 }
 
 // sendFrame writes a prepared frame to the underlying connection.
-// Used internally to send frames from the outbound queue.
-func (conn *Conn[KeyType]) sendFrame(req *SendFrameRequest) {
-	if req.ctx != nil && req.ctx.Err() != nil {
-		trySendErr(req.errCh, req.ctx.Err())
-		return
-	}
-
-	err := conn.writeFrame(req.frame)
-	trySendErr(req.errCh, err)
-}
-
-// Low level writing, not safe to use concurrently.
-// Use SendString, SendJSON, SendBytes for safe writing.
-func (conn *Conn[KeyType]) writeFrame(frame *Frame) (err error) {
-	err = conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
+// Used internally to send frames from the outbound queues.
+func (conn *Conn[KeyType]) sendFrame(frame *Frame) error {
+	err := conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
 		return Fatal(err)
 	}

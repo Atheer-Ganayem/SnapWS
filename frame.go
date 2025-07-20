@@ -50,11 +50,10 @@ type Message struct {
 
 func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, error) {
 	frame := Frame{
-		FIN:        FIN,
-		OPCODE:     OPCODE,
-		IsMasked:   IsMasked,
-		Payload:    payload,
-		MaskingKey: make([]byte, 4),
+		FIN:      FIN,
+		OPCODE:   OPCODE,
+		IsMasked: IsMasked,
+		Payload:  payload,
 	}
 
 	if payload != nil {
@@ -62,6 +61,7 @@ func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, err
 	}
 
 	if IsMasked {
+		frame.MaskingKey = make([]byte, 4)
 		_, err := rand.Read(frame.MaskingKey)
 		if err != nil {
 			return frame, err
