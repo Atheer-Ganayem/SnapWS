@@ -40,11 +40,10 @@ func (conn *Conn[KeyType]) readLoop() {
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
 func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
-	buf := make([]byte, conn.Manager.ReadBufferSize)
 	var data bytes.Buffer
 
 	for {
-		n, err := conn.raw.Read(buf)
+		n, err := conn.raw.Read(conn.readFrameBuf)
 		if err != nil && err != io.EOF {
 			return nil, CloseProtocolError, err
 		}
@@ -52,13 +51,13 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 			return nil, CloseMessageTooBig, ErrMessageTooLarge
 		}
 		if n > 0 {
-			_, err = data.Write(buf[:n])
+			_, err = data.Write(conn.readFrameBuf[:n])
 			if err != nil {
 				return nil, CloseInternalServerErr, err
 			}
 		}
-
 		ok, fErr := IsCompleteFrame(data.Bytes())
+
 		if fErr != nil {
 			return nil, CloseProtocolError, fErr
 		}
@@ -201,12 +200,16 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func (r *ConnReader) Payload() []byte {
+	return r.message.Payload.Bytes()
+}
+
 // NextReader returns an io.Reader for the next complete WebSocket message.
 // It blocks until a full message is available or the context is canceled.
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
 // If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn[KeyType]) NextReader(ctx context.Context) (io.Reader, int8, error) {
+func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -240,12 +243,12 @@ func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data 
 		return -1, nil, err
 	}
 
-	payload, err := io.ReadAll(reader)
-	if err != nil {
-		return -1, nil, err
-	}
+	// payload, err := io.ReadAll(reader)
+	// if err != nil {
+	// 	return -1, nil, err
+	// }
 
-	return msgType, payload, nil
+	return msgType, reader.Payload(), nil
 }
 
 // ReadBinary returns the binary payload from a WebSocket binary message.

@@ -32,6 +32,8 @@ type Conn[KeyType comparable] struct {
 	outboundControl chan *SendFrameRequest
 
 	writer *ConnWriter[KeyType]
+
+	readFrameBuf []byte // testing, not commiting yet
 }
 
 type SendFrameRequest struct {
@@ -53,6 +55,8 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 
 		outboundFrames:  make(chan *SendFrameRequest, m.OutboundFramesSize),
 		outboundControl: make(chan *SendFrameRequest, m.OutboundControlSize),
+
+		readFrameBuf: make([]byte, m.ReadBufferSize),
 	}
 
 	conn.writer = conn.newWriter(OpcodeText)
@@ -95,8 +99,8 @@ func (conn *Conn[KeyType]) listen() {
 		select {
 		case req, ok := <-conn.outboundControl:
 			if !ok {
-				if req != nil && req.errCh != nil {
-					req.errCh <- ErrChannelClosed
+				if req != nil {
+					trySendErr(req.errCh, ErrChannelClosed)
 				}
 				return
 			}
@@ -108,7 +112,9 @@ func (conn *Conn[KeyType]) listen() {
 		case req, ok := <-conn.outboundFrames:
 			// checking if chan is closes
 			if !ok {
-				trySendErr(req.errCh, ErrChannelClosed)
+				if req != nil {
+					trySendErr(req.errCh, ErrChannelClosed)
+				}
 				return
 			}
 			if req == nil {

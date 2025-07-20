@@ -77,25 +77,28 @@ func (frame *Frame) IsText() bool {
 
 func IsCompleteFrame(raw []byte) (bool, error) {
 	if len(raw) < 2 {
+		fmt.Println(1)
 		return false, nil
 	}
-
 	isMasked := raw[1]&0b10000000 != 0
 	payloadLen := int(raw[1] & 0b01111111)
 	offset := 2
 
 	if payloadLen == 126 {
 		if len(raw) < offset+2 {
+			fmt.Println(2)
 			return false, nil
 		}
 		payloadLen = int(binary.BigEndian.Uint16(raw[offset : offset+2]))
 		offset += 2
 	} else if payloadLen == 127 {
 		if len(raw) < offset+8 {
+			fmt.Println(3)
 			return false, nil
 		}
 		int64Len := binary.BigEndian.Uint64(raw[offset : offset+8])
 		if int64Len > math.MaxInt {
+			fmt.Println(4)
 			return false, fmt.Errorf("payload length too large: %d", int64Len)
 		}
 		payloadLen = int(int64Len)
@@ -104,12 +107,14 @@ func IsCompleteFrame(raw []byte) (bool, error) {
 
 	if isMasked {
 		if len(raw) < offset+4 {
+			fmt.Println(5)
 			return false, nil
 		}
 		offset += 4
 	}
 
 	if len(raw) < offset+payloadLen {
+		fmt.Println(6)
 		return false, nil
 	}
 
