@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"time"
 )
@@ -40,36 +39,51 @@ func (conn *Conn[KeyType]) readLoop() {
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
 func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
-	var data bytes.Buffer
+	buf := conn.readFrameBuf
+	offset := 0
+	var data []byte
 
 	for {
-		n, err := conn.raw.Read(conn.readFrameBuf)
+		n, err := conn.raw.Read(buf[offset:])
 		if err != nil && err != io.EOF {
 			return nil, CloseProtocolError, err
 		}
-		if data.Len()+n > conn.Manager.MaxMessageSize {
-			return nil, CloseMessageTooBig, ErrMessageTooLarge
-		}
-		if n > 0 {
-			_, err = data.Write(conn.readFrameBuf[:n])
-			if err != nil {
-				return nil, CloseInternalServerErr, err
-			}
-		}
-		ok, fErr := IsCompleteFrame(data.Bytes())
-
-		if fErr != nil {
-			return nil, CloseProtocolError, fErr
-		}
-		if ok {
+		offset += n
+		if err == io.EOF {
 			break
 		}
-		if !ok && err == io.EOF {
-			return nil, CloseProtocolError, fmt.Errorf("incomplete frame at EOF")
+
+		length, err := readLength(buf[:offset])
+		if length == offset {
+			break
+		}
+		if IsFatalErr(err) {
+			return nil, CloseProtocolError, err
+		} else if err == nil {
+			if offset > length {
+				return nil, CloseProtocolError, ErrInvalidPayloadLength
+			}
+			if length > len(buf) {
+				data = make([]byte, length)
+				copy(data, buf[:offset])
+				n, err = io.ReadFull(conn.raw, data[offset:])
+			} else {
+				n, err = io.ReadFull(conn.raw, buf[offset:])
+			}
+			offset += n
+			if err != nil {
+				return nil, CloseProtocolError, err
+			}
+			break
 		}
 	}
-
-	frame, err := ReadFrame(data.Bytes())
+	var frame *Frame
+	var err error
+	if data == nil {
+		frame, err = ReadFrame(buf[:offset])
+	} else {
+		frame, err = ReadFrame(data[:offset])
+	}
 	if err != nil {
 		return nil, CloseProtocolError, err
 	} else if !frame.IsMasked {
@@ -82,7 +96,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 		}
 		switch frame.OPCODE {
 		case OpcodeClose:
-			return &frame, CloseNormalClosure, io.EOF
+			return frame, CloseNormalClosure, io.EOF
 
 		case OpcodePing:
 			conn.Pong(frame.Payload)
@@ -94,7 +108,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 		}
 	}
 
-	return &frame, 0, nil
+	return frame, 0, nil
 }
 
 // This is the method used for accepting a full websocket message (text or binary).

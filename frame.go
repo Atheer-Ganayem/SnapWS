@@ -145,11 +145,11 @@ func IsValidCloseCode(code uint16) bool {
 	return slices.Contains(allowedCodes, code)
 }
 
-func ReadFrame(raw []byte) (Frame, error) {
+func ReadFrame(raw []byte) (*Frame, error) {
 	var frame Frame
 
 	if len(raw) < 2 {
-		return frame, errors.New("incomplete header (need at least 2 bytes)")
+		return nil, errors.New("incomplete header (need at least 2 bytes)")
 	}
 
 	frame.FIN = raw[0]&0b10000000 != 0
@@ -157,24 +157,24 @@ func ReadFrame(raw []byte) (Frame, error) {
 	frame.IsMasked = raw[1]&0b10000000 != 0
 	rsv := raw[0] & 0b01110000
 	if rsv != 0 {
-		return frame, errors.New("non-zero reserved bits set without negotiated extension")
+		return nil, errors.New("non-zero reserved bits set without negotiated extension")
 	}
 
 	offset, err := frame.parsePayloadLength(raw)
 	if err != nil {
-		return frame, err
+		return nil, err
 	}
 
 	if frame.IsMasked {
 		if len(raw) < offset+4 {
-			return frame, errors.New("incomplete masking key")
+			return nil, errors.New("incomplete masking key")
 		}
 		frame.MaskingKey = raw[offset : offset+4]
 		offset += 4
 	}
 
 	if len(raw) < offset+frame.PayloadLength {
-		return frame, errors.New("incomplete payload")
+		return nil, errors.New("incomplete payload")
 	}
 
 	maskedPayload := raw[offset : offset+frame.PayloadLength]
@@ -188,7 +188,7 @@ func ReadFrame(raw []byte) (Frame, error) {
 		copy(frame.Payload, maskedPayload)
 	}
 
-	return frame, nil
+	return &frame, nil
 }
 
 func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
@@ -209,7 +209,7 @@ func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
 		}
 		length64 := binary.BigEndian.Uint64(raw[offset : offset+8])
 		if length64 > math.MaxInt32 {
-			return offset, fmt.Errorf("payload too large: %d", length64)
+			return offset, ErrTooLargePayload
 		}
 		frame.PayloadLength = int(length64)
 		offset += 8
@@ -277,4 +277,41 @@ func mask(payload []byte, maskingKey []byte) {
 	for i := range payload {
 		payload[i] = payload[i] ^ maskingKey[i%4]
 	}
+}
+
+func readLength(b []byte) (int, error) {
+	if len(b) < 2 {
+		return -1, errors.New("incomplete header (need at least 2 bytes)")
+	}
+
+	isMasked := b[1]&0b10000000 != 0
+	payloadLen := int(b[1] & 0b01111111)
+	if payloadLen < 0 {
+		return -1, Fatal(ErrInvalidPayloadLength)
+	}
+
+	total := 2
+	if isMasked {
+		total += 4
+	}
+
+	if payloadLen < 126 {
+		total += payloadLen
+	} else if payloadLen == 126 {
+		if len(b) < 4 {
+			return -1, errors.New("incomplete extended 16-bit length")
+		}
+		total += int(binary.BigEndian.Uint16(b[2:4])) + 2
+	} else if payloadLen == 127 {
+		if len(b) < 10 {
+			return -1, errors.New("incomplete extended 64-bit length")
+		}
+		length64 := binary.BigEndian.Uint64(b[2:10])
+		if length64 > math.MaxInt32 {
+			return -1, Fatal(ErrTooLargePayload)
+		}
+		total += int(length64) + 8
+	}
+
+	return total, nil
 }

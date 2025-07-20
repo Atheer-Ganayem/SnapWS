@@ -382,6 +382,7 @@ func BenchmarkAcceptFrame(b *testing.B) {
 		defer s2.Close()
 
 		payload := []byte("hello")
+		// payload := make([]byte, 8192)
 		frame, _ := NewFrame(true, OpcodeText, true, payload)
 
 		for i := 0; i < b.N; i++ {
@@ -404,6 +405,9 @@ func BenchmarkAcceptFrame(b *testing.B) {
 		if err != nil {
 			b.Fatalf("acceptFrame failed: %v", err)
 		}
+		// if code != 0 || frame.PayloadLength != 8192 {
+		// 	b.Fatalf("unexpected frame data")
+		// }
 		if code != 0 || !bytes.Equal(frame.Payload, []byte("hello")) {
 			b.Fatalf("unexpected frame data")
 		}

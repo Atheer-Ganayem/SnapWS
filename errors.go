@@ -62,5 +62,6 @@ var (
 	ErrWriterClosed     = errors.New("writer is closed")
 	ErrBufferWriteFaild = errors.New("writing to buffer faild")
 
-	ErrWriterNotClosed = errors.New("cannot get the next writer without closing the previous one")
+	ErrWriterNotClosed      = errors.New("cannot get the next writer without closing the previous one")
+	ErrInvalidPayloadLength = errors.New("invalid payload length")
 )
