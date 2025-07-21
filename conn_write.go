@@ -167,9 +167,15 @@ func (conn *Conn[KeyType]) sendFrame(frame *Frame) error {
 		return Fatal(err)
 	}
 
-	_, err = conn.raw.Write(frame.Bytes())
-	if err != nil {
-		return Fatal(err)
+	written := 0
+	data := frame.Bytes()
+
+	for written < len(data) {
+		n, err := conn.raw.Write(data[written:])
+		if err != nil {
+			return Fatal(err)
+		}
+		written += n
 	}
 
 	return nil

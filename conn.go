@@ -33,7 +33,7 @@ type Conn[KeyType comparable] struct {
 
 	writer *ConnWriter[KeyType]
 
-	readFrameBuf []byte // testing, not commiting yet
+	readFrameBuf []byte
 }
 
 type SendFrameRequest struct {
