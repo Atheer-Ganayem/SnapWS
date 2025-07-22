@@ -39,80 +39,81 @@ func (conn *Conn[KeyType]) readLoop() {
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
 func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
-	buf := conn.readFrameBuf
-	offset := 0
-	var data []byte
-
 	for {
-		n, err := conn.raw.Read(buf[offset:])
-		if err != nil && err != io.EOF {
-			return nil, CloseProtocolError, err
-		}
-		offset += n
-		if err == io.EOF {
-			break
-		}
+		buf := conn.readFrameBuf
+		offset := 0
+		var data []byte
 
-		length, err := readLength(buf[:offset])
-		if conn.Manager.MaxMessageSize != -1 && length > conn.Manager.MaxMessageSize {
-			return nil, CloseMessageTooBig, ErrTooLargePayload
-		}
-		if length == offset {
-			break
-		}
-		if IsFatalErr(err) {
-			return nil, CloseProtocolError, err
-		} else if err == nil {
-			if offset > length {
-				return nil, CloseProtocolError, ErrInvalidPayloadLength
-			}
-			if length > len(buf) {
-				data = make([]byte, length)
-				copy(data, buf[:offset])
-				n, err = io.ReadFull(conn.raw, data[offset:])
-			} else {
-				n, err = io.ReadFull(conn.raw, buf[offset:length])
-			}
-			offset += n
+		for {
+			n, err := conn.raw.Read(buf[offset:])
 			if err != nil && err != io.EOF {
 				return nil, CloseProtocolError, err
 			}
-			break
+			offset += n
+			if err == io.EOF {
+				break
+			}
+
+			length, err := readLength(buf[:offset])
+			if conn.Manager.MaxMessageSize != -1 && length > conn.Manager.MaxMessageSize {
+				return nil, CloseMessageTooBig, ErrTooLargePayload
+			}
+			if length == offset {
+				break
+			}
+			if IsFatalErr(err) {
+				return nil, CloseProtocolError, err
+			} else if err == nil {
+				if offset > length {
+					return nil, CloseProtocolError, ErrInvalidPayloadLength
+				}
+				if length > len(buf) {
+					data = make([]byte, length)
+					copy(data, buf[:offset])
+					n, err = io.ReadFull(conn.raw, data[offset:])
+				} else {
+					n, err = io.ReadFull(conn.raw, buf[offset:length])
+				}
+				offset += n
+				if err != nil && err != io.EOF {
+					return nil, CloseProtocolError, err
+				}
+				break
+			}
 		}
-	}
 
-	var frame *Frame
-	var err error
-	if data == nil {
-		frame, err = ReadFrame(buf[:offset])
-	} else {
-		frame, err = ReadFrame(data[:offset])
-	}
-	if err != nil {
-		return nil, CloseProtocolError, err
-	} else if !frame.IsMasked {
-		return nil, CloseProtocolError, errExpectedMaskedFrame
-	}
-
-	if frame.IsControl() {
-		if !frame.IsValidControl() {
-			return nil, CloseProtocolError, ErrInvalidControlFrame
+		var frame *Frame
+		var err error
+		if data == nil {
+			frame, err = ReadFrame(buf[:offset])
+		} else {
+			frame, err = ReadFrame(data[:offset])
 		}
-		switch frame.OPCODE {
-		case OpcodeClose:
-			return frame, CloseNormalClosure, io.EOF
-
-		case OpcodePing:
-			conn.Pong(frame.Payload())
-			return conn.acceptFrame()
-
-		case OpcodePong:
-			conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
-			return conn.acceptFrame()
+		if err != nil {
+			return nil, CloseProtocolError, err
+		} else if !frame.IsMasked {
+			return nil, CloseProtocolError, errExpectedMaskedFrame
 		}
-	}
 
-	return frame, 0, nil
+		if frame.IsControl() {
+			if !frame.IsValidControl() {
+				return nil, CloseProtocolError, ErrInvalidControlFrame
+			}
+			switch frame.OPCODE {
+			case OpcodeClose:
+				return frame, CloseNormalClosure, io.EOF
+
+			case OpcodePing:
+				go conn.Pong(frame.Payload())
+				continue
+
+			case OpcodePong:
+				conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
+				continue
+			}
+		}
+		return frame, 0, nil
+	}
 }
 
 // This is the method used for accepting a full websocket message (text or binary).
@@ -255,11 +256,6 @@ func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data 
 	if err != nil {
 		return -1, nil, err
 	}
-
-	// payload, err := io.ReadAll(reader)
-	// if err != nil {
-	// 	return -1, nil, err
-	// }
 
 	return msgType, reader.Payload(), nil
 }

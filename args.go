@@ -6,10 +6,9 @@ import (
 )
 
 const (
-	defaultWriteWait     = time.Second * 5
-	defaultReadWait      = time.Minute
-	defaultPingEvery     = time.Second * 50
-	defaultWriterTimeout = time.Second * 5
+	defaultWriteWait = time.Second * 5
+	defaultReadWait  = time.Minute
+	defaultPingEvery = time.Second * 50
 
 	DefaultMaxMessageSize  = 1 << 20 // 1MB
 	DefaultReadBufferSize  = 4096
@@ -18,7 +17,6 @@ const (
 	DefaultInboundFrames   = 32
 	DefaultInboundMessages = 8
 
-	DefaultOutboundFrames  = 16
 	DefaultOutboundControl = 4
 )
 
@@ -36,9 +34,6 @@ type Args[KeyType comparable] struct {
 	ReadWait time.Duration
 	// If not set it will default to 50 seconds.
 	PingEvery time.Duration
-	// Timeout for the writer trying to flush if the outbound channel is full.
-	// if not set it will default to 5
-	WriterTimeout time.Duration
 
 	// This is the max size of message sent by the client. if not set it will default to 1MB
 	// -1 means there is no max size.
@@ -52,14 +47,11 @@ type Args[KeyType comparable] struct {
 	ReadBufferSize int
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
-	//
 
 	// the size of iboundFrames chan buffer, if not set it will default to 32
 	InboundFramesSize int
 	// the size of iboundMessages chan buffer, if not set it will default to 8
 	InboundMessagesSize int
-	// the size of outboundFrames chan buffer, if not set it will default to 16
-	OutboundFramesSize int
 	// the size of outboundControl chan buffer, if not set it will default to 4
 	OutboundControlSize int
 
@@ -92,9 +84,6 @@ func (args *Args[KeyType]) WithDefault() {
 	if args.PingEvery == 0 {
 		args.PingEvery = defaultPingEvery
 	}
-	if args.WriterTimeout == 0 {
-		args.WriterTimeout = defaultWriterTimeout
-	}
 	if args.MaxMessageSize == 0 {
 		args.MaxMessageSize = DefaultMaxMessageSize
 	}
@@ -110,9 +99,6 @@ func (args *Args[KeyType]) WithDefault() {
 	}
 	if args.InboundMessagesSize == 0 {
 		args.InboundMessagesSize = DefaultInboundMessages
-	}
-	if args.OutboundFramesSize == 0 {
-		args.OutboundFramesSize = DefaultOutboundFrames
 	}
 	if args.OutboundControlSize == 0 {
 		args.OutboundControlSize = DefaultOutboundControl

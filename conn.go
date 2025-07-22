@@ -119,7 +119,10 @@ func (conn *Conn[KeyType]) listen() {
 				break
 			}
 
-			trySendErr(conn.writer.errCh, conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used]))
+			err := conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used])
+			if conn.writer.ctx.Err() == nil {
+				trySendErr(conn.writer.errCh, err)
+			}
 		}
 	}
 }

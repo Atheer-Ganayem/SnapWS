@@ -328,25 +328,12 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), conn.Manager.WriteWait)
-	defer cancel()
 	errCh := make(chan error)
+	conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}
 
-	select {
-	case <-ctx.Done():
-		conn.closeWithCode(ClosePolicyViolation, "pong enqueue timeout")
+	err = <-errCh
+	if IsFatalErr(err) {
+		conn.closeWithCode(CloseInternalServerErr, err.Error())
 		return
-	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: ctx}:
-	}
-
-	select {
-	case <-ctx.Done():
-		conn.closeWithCode(ClosePolicyViolation, "pong enqueue timeout")
-		return
-	case err = <-errCh:
-		if err != nil {
-			conn.closeWithCode(ClosePolicyViolation, "pong failed: "+err.Error())
-			return
-		}
 	}
 }

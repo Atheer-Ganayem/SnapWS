@@ -36,11 +36,9 @@ func newTestManager() *Manager[string] {
 	return &Manager[string]{
 		Args: Args[string]{
 			WriteBufferSize:     4096,
-			WriterTimeout:       time.Second,
 			PingEvery:           time.Minute,
 			InboundFramesSize:   16,
 			InboundMessagesSize: 16,
-			OutboundFramesSize:  10000,
 			OutboundControlSize: 8,
 		},
 	}
