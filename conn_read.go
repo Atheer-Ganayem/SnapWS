@@ -19,7 +19,7 @@ func (conn *Conn[KeyType]) readLoop() {
 	for {
 		frame, code, err := conn.acceptFrame()
 		if code == CloseNormalClosure && frame != nil {
-			conn.closeWithPayload(frame.Payload)
+			conn.closeWithPayload(frame.Payload())
 			return
 		} else if err != nil {
 			conn.closeWithCode(code, err.Error())
@@ -71,15 +71,16 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 				copy(data, buf[:offset])
 				n, err = io.ReadFull(conn.raw, data[offset:])
 			} else {
-				n, err = io.ReadFull(conn.raw, buf[offset:])
+				n, err = io.ReadFull(conn.raw, buf[offset:length])
 			}
 			offset += n
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return nil, CloseProtocolError, err
 			}
 			break
 		}
 	}
+
 	var frame *Frame
 	var err error
 	if data == nil {
@@ -102,7 +103,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 			return frame, CloseNormalClosure, io.EOF
 
 		case OpcodePing:
-			conn.Pong(frame.Payload)
+			conn.Pong(frame.Payload())
 			return conn.acceptFrame()
 
 		case OpcodePong:
@@ -134,17 +135,11 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			return
 		}
 
-		message := &Message{OPCODE: frame.OPCODE}
+		message := &Message{OPCODE: frame.OPCODE, Payload: bytes.NewBuffer(frame.Payload())}
+
 		if frame.FIN {
-			message.Payload = bytes.NewBuffer(frame.Payload)
 			conn.inboundMessages <- message
 			continue
-		}
-		message.Payload = bytes.NewBuffer(make([]byte, 0, conn.Manager.ReadBufferSize))
-		_, err := message.Payload.Write(frame.Payload)
-		if err != nil {
-			conn.closeWithCode(CloseInternalServerErr, ErrBufferWriteFaild.Error())
-			return
 		}
 
 		frameCount := 1
@@ -166,8 +161,9 @@ func (conn *Conn[KeyType]) acceptMessage() {
 				conn.closeWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
 				return
 			}
-			_, err = message.Payload.Write(frame.Payload)
+			_, err := message.Payload.Write(frame.Payload())
 			if err != nil {
+				conn.closeWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 				return
 			}
 

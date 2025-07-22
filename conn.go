@@ -26,9 +26,7 @@ type Conn[KeyType comparable] struct {
 	// ticker for ping loop
 	ticker *time.Ticker
 
-	// used for sending a Message frame, text or binary only.
-	outboundFrames chan *SendFrameRequest
-	// used for sending outboundControl frames.
+	// used for sending control frames.
 	outboundControl chan *SendFrameRequest
 
 	writer *ConnWriter[KeyType]
@@ -53,7 +51,6 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
 		inboundMessages: make(chan *Message, m.InboundMessagesSize),
 
-		outboundFrames:  make(chan *SendFrameRequest, m.OutboundFramesSize),
 		outboundControl: make(chan *SendFrameRequest, m.OutboundControlSize),
 
 		readFrameBuf: make([]byte, m.ReadBufferSize),
@@ -107,30 +104,22 @@ func (conn *Conn[KeyType]) listen() {
 			if req == nil {
 				break
 			}
-			trySendErr(req.errCh, conn.sendFrame(req.frame))
+			trySendErr(req.errCh, conn.sendFrame(req.frame.Encoded))
 
-		case req, ok := <-conn.outboundFrames:
-			// checking if chan is closes
+		case _, ok := <-conn.writer.sig:
 			if !ok {
-				if req != nil {
-					trySendErr(req.errCh, ErrChannelClosed)
+				if conn.writer != nil {
+					trySendErr(conn.writer.errCh, Fatal(ErrChannelClosed))
 				}
 				return
 			}
-			if req == nil {
+
+			if conn.writer.ctx.Err() != nil {
+				trySendErr(conn.writer.errCh, conn.writer.ctx.Err())
 				break
 			}
-			// checking if ctx is done
-			if req.ctx == nil {
-				req.ctx = context.Background()
-			}
-			if req.ctx.Err() != nil {
-				if req.errCh != nil {
-					trySendErr(req.errCh, req.ctx.Err())
-					break
-				}
-			}
-			trySendErr(req.errCh, conn.sendFrame(req.frame))
+
+			trySendErr(conn.writer.errCh, conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used]))
 		}
 	}
 }
@@ -177,12 +166,13 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		case <-time.After(conn.Manager.WriteWait):
 		}
 
+		conn.writer.Close()
 		conn.raw.Close()
 		conn.isClosed.Store(true)
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
-		close(conn.outboundFrames)
+		close(conn.writer.sig)
 		close(conn.outboundControl)
 		close(conn.inboundMessages)
 		close(conn.inboundFrames)

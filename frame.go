@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math"
 	"slices"
 	"unicode/utf8"
@@ -39,8 +38,9 @@ type Frame struct {
 	OPCODE        uint8
 	PayloadLength int
 	IsMasked      bool
-	MaskingKey    []byte
-	Payload       []byte
+	// not garantueed to be masked.
+	Encoded       []byte
+	PayloadOffset int
 }
 
 type Message struct {
@@ -48,115 +48,38 @@ type Message struct {
 	Payload *bytes.Buffer
 }
 
-func NewFrame(FIN bool, OPCODE uint8, IsMasked bool, payload []byte) (Frame, error) {
+func NewFrame(FIN bool, OPCODE uint8, isMasked bool, payload []byte) (Frame, error) {
 	frame := Frame{
 		FIN:      FIN,
 		OPCODE:   OPCODE,
-		IsMasked: IsMasked,
-		Payload:  payload,
+		IsMasked: isMasked,
 	}
 
 	if payload != nil {
 		frame.PayloadLength = len(payload)
 	}
+	err := frame.Encode()
+	frame.Encoded = append(frame.Encoded, payload...)
 
-	if IsMasked {
-		frame.MaskingKey = make([]byte, 4)
-		_, err := rand.Read(frame.MaskingKey)
-		if err != nil {
-			return frame, err
-		}
-	}
-
-	return frame, nil
+	return frame, err
 }
 
-func (frame *Frame) IsText() bool {
-	return frame.OPCODE == OpcodeText
-}
-
-func IsCompleteFrame(raw []byte) (bool, error) {
-	if len(raw) < 2 {
-		fmt.Println(1)
-		return false, nil
-	}
-	isMasked := raw[1]&0b10000000 != 0
-	payloadLen := int(raw[1] & 0b01111111)
-	offset := 2
-
-	if payloadLen == 126 {
-		if len(raw) < offset+2 {
-			fmt.Println(2)
-			return false, nil
-		}
-		payloadLen = int(binary.BigEndian.Uint16(raw[offset : offset+2]))
-		offset += 2
-	} else if payloadLen == 127 {
-		if len(raw) < offset+8 {
-			fmt.Println(3)
-			return false, nil
-		}
-		int64Len := binary.BigEndian.Uint64(raw[offset : offset+8])
-		if int64Len > math.MaxInt {
-			fmt.Println(4)
-			return false, fmt.Errorf("payload length too large: %d", int64Len)
-		}
-		payloadLen = int(int64Len)
-		offset += 8
-	}
-
-	if isMasked {
-		if len(raw) < offset+4 {
-			fmt.Println(5)
-			return false, nil
-		}
-		offset += 4
-	}
-
-	if len(raw) < offset+payloadLen {
-		fmt.Println(6)
-		return false, nil
-	}
-
-	return true, nil
-}
-
-func (frame *Frame) IsControl() bool {
-	return frame.OPCODE == OpcodeClose || frame.OPCODE == OpcodePing || frame.OPCODE == OpcodePong
-}
-
-func (frame *Frame) IsValidControl() bool {
-	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
-}
-
-func (message *Message) IsValidUTF8() bool {
-	return utf8.Valid(message.Payload.Bytes())
-}
-
-func (message *Message) IsBinary() bool {
-	return message.OPCODE == OpcodeBinary
-}
-
-func (message *Message) IsText() bool {
-	return message.OPCODE == OpcodeText
-}
-
-func IsValidCloseCode(code uint16) bool {
-	return slices.Contains(allowedCodes, code)
-}
-
+// Reads a slice of bytes into a frame and returns the pointer.
+// If the frame is masked, it will unmask it.
+// Note: the payload is copied, not refrenced to the slice.
 func ReadFrame(raw []byte) (*Frame, error) {
-	var frame Frame
-
 	if len(raw) < 2 {
-		return nil, errors.New("incomplete header (need at least 2 bytes)")
+		return nil, errors.New("-incomplete header (need at least 2 bytes)")
 	}
 
+	frame := &Frame{}
 	frame.FIN = raw[0]&0b10000000 != 0
 	frame.OPCODE = raw[0] & 0b00001111
 	frame.IsMasked = raw[1]&0b10000000 != 0
 	rsv := raw[0] & 0b01110000
-	if rsv != 0 {
+	if !frame.isValidOpcode() {
+		return nil, ErrInvalidOPCODE
+	} else if rsv != 0 {
 		return nil, errors.New("non-zero reserved bits set without negotiated extension")
 	}
 
@@ -165,11 +88,12 @@ func ReadFrame(raw []byte) (*Frame, error) {
 		return nil, err
 	}
 
+	var maskingKey []byte
 	if frame.IsMasked {
 		if len(raw) < offset+4 {
 			return nil, errors.New("incomplete masking key")
 		}
-		frame.MaskingKey = raw[offset : offset+4]
+		maskingKey = raw[offset : offset+4]
 		offset += 4
 	}
 
@@ -177,21 +101,29 @@ func ReadFrame(raw []byte) (*Frame, error) {
 		return nil, errors.New("incomplete payload")
 	}
 
-	maskedPayload := raw[offset : offset+frame.PayloadLength]
-	frame.Payload = make([]byte, frame.PayloadLength)
-
 	if frame.IsMasked {
-		for i := 0; i < frame.PayloadLength; i++ {
-			frame.Payload[i] = maskedPayload[i] ^ frame.MaskingKey[i%4]
+		for i := range raw[offset : offset+frame.PayloadLength] {
+			raw[offset+i] = raw[offset+i] ^ maskingKey[i%4]
 		}
-	} else {
-		copy(frame.Payload, maskedPayload)
 	}
 
-	return &frame, nil
+	frame.PayloadOffset = offset
+
+	frame.Encoded = make([]byte, len(raw))
+	copy(frame.Encoded, raw)
+
+	return frame, nil
 }
 
+// Asigns frame.PayloadLength to the calculated length.
+// Returns int, a value of the offset where the "length bytes" end.
+// Also returns an error of a confilict happened (eg: bytes less than 2, length byte is 126
+// but the total bytes are less than 4, etc...)
 func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
+	if len(raw) < 2 {
+		return -1, errors.New("--incomplete header (need at least 2 bytes)")
+	}
+
 	payloadLen := int(raw[1] & 0b01111111)
 	offset := 2
 
@@ -237,48 +169,61 @@ func (f *Frame) CalcLength() int {
 	return length
 }
 
-func (f *Frame) Bytes() []byte {
-	b := make([]byte, 2, f.CalcLength())
+func (f *Frame) Encode() error {
+	length := f.CalcLength()
+	if cap(f.Encoded) < length {
+		f.Encoded = make([]byte, 2, length)
+	}
 
-	b[0] = f.OPCODE
+	f.PayloadOffset = 2
+
+	f.Encoded[0] = f.OPCODE
 	if f.FIN {
-		b[0] |= 0x80
+		f.Encoded[0] |= 0x80
 	}
 
 	if f.IsMasked {
-		b[1] |= 0x80
+		f.Encoded[1] |= 0x80
 	}
 
 	if f.PayloadLength < 126 && f.PayloadLength >= 0 {
-		b[1] += byte(f.PayloadLength)
+		f.Encoded[1] += byte(f.PayloadLength)
 	} else if f.PayloadLength <= math.MaxUint16 {
-		b[1] += 126
-		b = binary.BigEndian.AppendUint16(b, uint16(f.PayloadLength))
+		f.Encoded[1] += 126
+		f.Encoded = binary.BigEndian.AppendUint16(f.Encoded, uint16(f.PayloadLength))
+		f.PayloadOffset += 2
 	} else {
-		b[1] += 127
-		b = binary.BigEndian.AppendUint64(b, uint64(f.PayloadLength))
+		f.Encoded[1] += 127
+		f.Encoded = binary.BigEndian.AppendUint64(f.Encoded, uint64(f.PayloadLength))
+		f.PayloadOffset += 8
 	}
 
 	if f.IsMasked {
-		b = append(b, f.MaskingKey...)
-
-		masked := make([]byte, f.PayloadLength)
-		copy(masked, f.Payload)
-		mask(masked, f.MaskingKey)
-		b = append(b, masked...)
-	} else {
-		b = append(b, f.Payload...)
+		f.Encoded = f.Encoded[:len(f.Encoded)+4]
+		_, err := rand.Read(f.Encoded[len(f.Encoded)-4:])
+		if err != nil {
+			return err
+		}
+		f.PayloadOffset += 4
 	}
 
-	return b
+	return nil
 }
 
-func mask(payload []byte, maskingKey []byte) {
-	for i := range payload {
-		payload[i] = payload[i] ^ maskingKey[i%4]
+func (f *Frame) Mask() {
+	if !f.IsMasked {
+		return
+	}
+
+	maskingKey := f.Encoded[f.PayloadOffset-4 : f.PayloadOffset]
+	for i := range f.Encoded[f.PayloadOffset : f.PayloadOffset+f.PayloadLength] {
+		f.Encoded[f.PayloadOffset+i] = f.Encoded[f.PayloadOffset+i] ^ maskingKey[i%4]
 	}
 }
 
+// return the total expected length of the frame.
+// if it is not possible to expect the expected length out of the given byte slice,
+// it return a non-nil error
 func readLength(b []byte) (int, error) {
 	if len(b) < 2 {
 		return -1, errors.New("incomplete header (need at least 2 bytes)")
@@ -314,4 +259,73 @@ func readLength(b []byte) (int, error) {
 	}
 
 	return total, nil
+}
+
+// Write the frame header to a ConnWriter, must have at least 14 empty bytes at the begining.
+// Note: it doesnt supporting writing masking key, will support later.
+func (w *ConnWriter[KeyType]) writeHeaders(FIN bool, OPCODE uint8) error {
+	if w.start < 14 {
+		return ErrInsufficientHeaderSpace
+	}
+
+	payloadLength := w.used - w.start
+
+	if payloadLength < 0 {
+		return ErrInvalidPayloadLength
+	} else if payloadLength < 126 {
+		w.buf[w.start-1] = byte(payloadLength)
+		w.start--
+	} else if payloadLength <= math.MaxUint16 {
+		binary.BigEndian.PutUint16(w.buf[w.start-2:w.start], uint16(payloadLength))
+		w.buf[w.start-3] = 126
+		w.start -= 3
+	} else {
+		binary.BigEndian.PutUint64(w.buf[w.start-8:w.start], uint64(payloadLength))
+		w.buf[w.start-9] = 127
+		w.start -= 9
+	}
+
+	w.buf[w.start-1] = OPCODE
+	if FIN {
+		w.buf[w.start-1] |= 0x80
+	}
+	w.start--
+
+	return nil
+}
+
+func (frame *Frame) Payload() []byte {
+	return frame.Encoded[frame.PayloadOffset : frame.PayloadOffset+frame.PayloadLength]
+}
+
+func (frame *Frame) isValidOpcode() bool {
+	return frame.OPCODE == OpcodeBinary || frame.IsText() || frame.IsControl()
+}
+
+func (frame *Frame) IsText() bool {
+	return frame.OPCODE == OpcodeText
+}
+
+func (frame *Frame) IsControl() bool {
+	return frame.OPCODE == OpcodeClose || frame.OPCODE == OpcodePing || frame.OPCODE == OpcodePong
+}
+
+func (frame *Frame) IsValidControl() bool {
+	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
+}
+
+func (message *Message) IsValidUTF8() bool {
+	return utf8.Valid(message.Payload.Bytes())
+}
+
+func (message *Message) IsBinary() bool {
+	return message.OPCODE == OpcodeBinary
+}
+
+func (message *Message) IsText() bool {
+	return message.OPCODE == OpcodeText
+}
+
+func IsValidCloseCode(code uint16) bool {
+	return slices.Contains(allowedCodes, code)
 }

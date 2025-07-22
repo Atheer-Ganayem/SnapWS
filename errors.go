@@ -57,11 +57,16 @@ var (
 	ErrEmptyPayload             = errors.New("cannot send empty payload")
 	ErrConnClosed               = errors.New("connection is closed")
 
-	ErrNilBuf           = errors.New("cannot read into a nil buffer")
-	ErrWriteChanFull    = errors.New("write channel is full, slow client, message dropped")
-	ErrWriterClosed     = errors.New("writer is closed")
-	ErrBufferWriteFaild = errors.New("writing to buffer faild")
+	ErrNilBuf             = errors.New("cannot read into a nil buffer")
+	ErrWriteChanFull      = errors.New("write channel is full, slow client, message dropped")
+	ErrWriterClosed       = errors.New("writer is closed")
+	ErrWriterUnintialized = errors.New("writer is not intialized")
+	ErrBufferWriteFaild   = errors.New("writing to buffer faild")
 
 	ErrWriterNotClosed      = errors.New("cannot get the next writer without closing the previous one")
 	ErrInvalidPayloadLength = errors.New("invalid payload length")
+
+	ErrInsufficientHeaderSpace = errors.New("no enough space to write headers")
+
+	ErrInternalServer = errors.New("something went wrong")
 )

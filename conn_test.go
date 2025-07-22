@@ -46,15 +46,6 @@ func newTestManager() *Manager[string] {
 	}
 }
 
-// --- 3. Dummy Frame and NewFrame() ---
-type Frame1 struct {
-	Payload []byte
-}
-
-func NewFrame1(fin bool, opcode uint8, rsv1 bool, payload []byte) (Frame1, error) {
-	return Frame1{Payload: payload}, nil
-}
-
 // --- 4. Benchmark ---
 var benchSink interface{}
 
@@ -63,8 +54,8 @@ func BenchmarkWriter_Reuse(b *testing.B) {
 	conn := manager.newConn(nopConn{}, "bench", "")
 
 	go func() {
-		for req := range conn.outboundFrames {
-			req.errCh <- nil
+		for range conn.writer.sig {
+			conn.writer.errCh <- nil
 		}
 	}()
 
@@ -102,8 +93,8 @@ func BenchmarkWriter_SmallMessages(b *testing.B) {
 	conn := manager.newConn(nopConn{}, "bench", "")
 
 	go func() {
-		for req := range conn.outboundFrames {
-			req.errCh <- nil
+		for range conn.writer.sig {
+			conn.writer.errCh <- nil
 		}
 	}()
 
@@ -136,8 +127,8 @@ func BenchmarkWriter_LargeMessages(b *testing.B) {
 	conn := manager.newConn(nopConn{}, "bench", "")
 
 	go func() {
-		for req := range conn.outboundFrames {
-			req.errCh <- nil
+		for range conn.writer.sig {
+			conn.writer.errCh <- nil
 		}
 	}()
 
@@ -170,8 +161,8 @@ func BenchmarkWriter_MultiWriteBeforeFlush(b *testing.B) {
 	conn := manager.newConn(nopConn{}, "bench", "")
 
 	go func() {
-		for req := range conn.outboundFrames {
-			req.errCh <- nil
+		for range conn.writer.sig {
+			conn.writer.errCh <- nil
 		}
 	}()
 
@@ -206,8 +197,8 @@ func BenchmarkWriter_EmptyFlush(b *testing.B) {
 	conn := manager.newConn(nopConn{}, "bench", "")
 
 	go func() {
-		for req := range conn.outboundFrames {
-			req.errCh <- nil
+		for range conn.writer.sig {
+			conn.writer.errCh <- nil
 		}
 	}()
 
@@ -345,30 +336,6 @@ func BenchmarkReader_ConnReader_Read(b *testing.B) {
 // /////////////
 // ///////////
 // //////
-// --- Dummy net.Conn that returns a fixed frame payload repeatedly ---
-type frameReaderConn struct {
-	data   []byte
-	offset int
-}
-
-func (c *frameReaderConn) Read(b []byte) (int, error) {
-	if c.offset >= len(c.data) {
-		// Simulate blocking read with some delay (optional)
-		time.Sleep(1 * time.Millisecond)
-		return 0, io.EOF
-	}
-	n := copy(b, c.data[c.offset:])
-	c.offset += n
-	return n, nil
-}
-func (c *frameReaderConn) Write(b []byte) (int, error)        { return len(b), nil }
-func (c *frameReaderConn) Close() error                       { return nil }
-func (c *frameReaderConn) LocalAddr() net.Addr                { return nil }
-func (c *frameReaderConn) RemoteAddr() net.Addr               { return nil }
-func (c *frameReaderConn) SetDeadline(t time.Time) error      { return nil }
-func (c *frameReaderConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *frameReaderConn) SetWriteDeadline(t time.Time) error { return nil }
-
 // --- Benchmark for acceptFrame ---
 
 func BenchmarkAcceptFrame(b *testing.B) {
@@ -384,9 +351,12 @@ func BenchmarkAcceptFrame(b *testing.B) {
 		payload := []byte("hello")
 		// payload := make([]byte, 8192)
 		frame, _ := NewFrame(true, OpcodeText, true, payload)
+		frame.Mask()
+		c := make([]byte, len(frame.Encoded))
 
 		for i := 0; i < b.N; i++ {
-			_, err := s2.Write(frame.Bytes())
+			copy(c, frame.Encoded)
+			_, err := s2.Write(c)
 			if err != nil {
 				panic(err)
 			}
@@ -405,11 +375,36 @@ func BenchmarkAcceptFrame(b *testing.B) {
 		if err != nil {
 			b.Fatalf("acceptFrame failed: %v", err)
 		}
-		// if code != 0 || frame.PayloadLength != 8192 {
-		// 	b.Fatalf("unexpected frame data")
-		// }
-		if code != 0 || !bytes.Equal(frame.Payload, []byte("hello")) {
+		if code != 0 || !bytes.Equal(frame.Payload(), []byte("hello")) {
 			b.Fatalf("unexpected frame data")
 		}
 	}
+}
+
+func BenchmarkAcceptMessage(b *testing.B) {
+	manager := NewManager[string](nil)
+
+	s1, s2 := net.Pipe()
+
+	conn := manager.newConn(s1, "s1", "")
+	go conn.readLoop()
+	go func() {
+		defer s2.Close()
+		payload := []byte("hello")
+		frame, _ := NewFrame(true, OpcodeText, true, payload)
+		frame.Mask()
+		c := make([]byte, len(frame.Encoded))
+
+		for i := 0; i < b.N; i++ {
+			copy(c, frame.Encoded)
+			_, err := s2.Write(c)
+			if err != nil {
+				panic(err)
+			}
+		}
+		conn.Close()
+	}()
+
+	b.ResetTimer()
+	conn.acceptMessage()
 }
