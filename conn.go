@@ -12,14 +12,18 @@ import (
 )
 
 type Conn[KeyType comparable] struct {
-	raw       net.Conn
-	Manager   *Manager[KeyType]
-	Key       KeyType
+	raw         net.Conn
+	Manager     *Manager[KeyType]
+	SubProtocol string
+	Key         KeyType
+	MetaData    sync.Map
+	// channel used to signal that the conn is closed.
+	// when the conn closes, the channel closes, so any go routine trying to read from it,
+	// would receive ok=false, indicating that the channel is closed => conn is closed.
+	done      chan struct{}
 	isClosed  atomic.Bool
 	closeOnce sync.Once
-	MetaData  sync.Map
 	// Empty string means its a raw websocket
-	SubProtocol string
 
 	inboundFrames   chan *Frame
 	inboundMessages chan *Message
@@ -46,6 +50,7 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		Manager:     m,
 		Key:         key,
 		SubProtocol: subProtocol,
+		done:        make(chan struct{}),
 		ticker:      time.NewTicker(m.PingEvery),
 
 		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
@@ -65,6 +70,8 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 // succeeding to aquiring the lock, it return an error.
 func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 	select {
+	case <-conn.done:
+		return Fatal(ErrConnClosed)
 	case conn.writer.lock <- struct{}{}:
 		return nil
 	case <-ctx.Done():
@@ -132,9 +139,7 @@ func (conn *Conn[KeyType]) listen() {
 // If pinging fails the connection closes.
 func (conn *Conn[KeyType]) pingLoop() {
 	for range conn.ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), conn.Manager.WriteWait)
-		err := conn.Ping(ctx)
-		cancel()
+		err := conn.Ping()
 		if err != nil {
 			conn.closeWithCode(ClosePolicyViolation, "failed to ping")
 			return
@@ -175,6 +180,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
+		close(conn.done)
 		close(conn.writer.sig)
 		close(conn.outboundControl)
 		close(conn.inboundMessages)

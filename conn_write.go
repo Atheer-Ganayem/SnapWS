@@ -138,10 +138,13 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	}()
 
 	select {
+	case <-w.conn.done:
+		return Fatal(ErrChannelClosed)
 	case w.sig <- struct{}{}:
 	case <-w.ctx.Done():
 		return ErrWriteChanFull
 	}
+
 	select {
 	case err, ok := <-w.errCh:
 		if !ok {
@@ -280,11 +283,7 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 // Ping sends a WebSocket ping frame and waits for it to be sent.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-func (conn *Conn[Key]) Ping(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
+func (conn *Conn[Key]) Ping() error {
 	if conn.isClosed.Load() {
 		return Fatal(ErrConnClosed)
 	}
@@ -296,21 +295,17 @@ func (conn *Conn[Key]) Ping(ctx context.Context) error {
 
 	errCh := make(chan error)
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-conn.done:
+		return Fatal(ErrConnClosed)
 	case conn.outboundControl <- &SendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
-		ctx:   ctx,
+		ctx:   nil,
 	}:
 	}
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err = <-errCh:
-		return err
-	}
+	err = <-errCh
+	return err
 }
 
 // Pong sends a pong control frame in response to a ping.
@@ -329,7 +324,11 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 	}
 
 	errCh := make(chan error)
-	conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}
+	select {
+	case <-conn.done:
+		return
+	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
+	}
 
 	err = <-errCh
 	if IsFatalErr(err) {

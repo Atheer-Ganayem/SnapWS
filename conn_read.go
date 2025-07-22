@@ -27,6 +27,8 @@ func (conn *Conn[KeyType]) readLoop() {
 		}
 
 		select {
+		case <-conn.done:
+			return
 		case conn.inboundFrames <- frame:
 		default:
 			conn.closeWithCode(ClosePolicyViolation, "inboundFrames full — slow consumer")
@@ -104,11 +106,16 @@ func (conn *Conn[KeyType]) acceptFrame() (*Frame, uint16, error) {
 				return frame, CloseNormalClosure, io.EOF
 
 			case OpcodePing:
+				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+					return nil, CloseInternalServerErr, ErrInternalServer
+				}
 				go conn.Pong(frame.Payload())
 				continue
 
 			case OpcodePong:
-				conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait))
+				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+					return nil, CloseInternalServerErr, ErrInternalServer
+				}
 				continue
 			}
 		}
@@ -139,7 +146,11 @@ func (conn *Conn[KeyType]) acceptMessage() {
 		message := &Message{OPCODE: frame.OPCODE, Payload: bytes.NewBuffer(frame.Payload())}
 
 		if frame.FIN {
-			conn.inboundMessages <- message
+			select {
+			case <-conn.done:
+				return
+			case conn.inboundMessages <- message:
+			}
 			continue
 		}
 
@@ -178,7 +189,10 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			return
 		}
 
-		conn.inboundMessages <- message
+		select {
+		case <-conn.done:
+		case conn.inboundMessages <- message:
+		}
 	}
 }
 
