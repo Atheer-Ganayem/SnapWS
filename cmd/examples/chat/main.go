@@ -12,7 +12,7 @@ import (
 var manager *snapws.Manager[string]
 
 func main() {
-	manager = snapws.NewManager(&snapws.Args[string]{
+	manager = snapws.NewManager(&snapws.Options[string]{
 		Middlwares:   []snapws.Middlware{rejectDuplicateNames},
 		OnConnect:    onConnect,
 		OnDisconnect: onDisconnect,

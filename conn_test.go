@@ -34,7 +34,7 @@ func (nopConn) SetWriteDeadline(t time.Time) error { return nil }
 // --- 2. Fake Manager ---
 func newTestManager() *Manager[string] {
 	return &Manager[string]{
-		Args: Args[string]{
+		Options: Options[string]{
 			WriteBufferSize:     4096,
 			PingEvery:           time.Minute,
 			InboundFramesSize:   16,

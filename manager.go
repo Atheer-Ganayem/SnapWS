@@ -13,20 +13,20 @@ type Manager[KeyType comparable] struct {
 	// Each connection must be keyed by a unique identifier, preferably the user id.
 	Conns map[KeyType]*Conn[KeyType]
 	Mu    sync.RWMutex
-	Args[KeyType]
+	Options[KeyType]
 }
 
 // Creates a new manager. KeyType is the type of the key of the conns map.
 // KeyType must be comparable.
-func NewManager[KeyType comparable](args *Args[KeyType]) *Manager[KeyType] {
+func NewManager[KeyType comparable](args *Options[KeyType]) *Manager[KeyType] {
 	if args == nil {
-		args = &Args[KeyType]{}
+		args = &Options[KeyType]{}
 	}
 	args.WithDefault()
 
 	m := &Manager[KeyType]{
-		Conns: make(map[KeyType]*Conn[KeyType]),
-		Args:  *args,
+		Conns:   make(map[KeyType]*Conn[KeyType]),
+		Options: *args,
 	}
 
 	return m

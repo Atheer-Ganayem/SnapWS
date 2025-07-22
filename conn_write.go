@@ -140,12 +140,14 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	select {
 	case <-w.conn.done:
 		return Fatal(ErrChannelClosed)
-	case w.sig <- struct{}{}:
 	case <-w.ctx.Done():
-		return ErrWriteChanFull
+		return w.ctx.Err()
+	case w.sig <- struct{}{}:
 	}
 
 	select {
+	case <-w.ctx.Done():
+		return w.ctx.Err()
 	case err, ok := <-w.errCh:
 		if !ok {
 			return Fatal(ErrChannelClosed)
@@ -154,8 +156,6 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 			w.conn.closeWithCode(CloseInternalServerErr, err.Error())
 		}
 		return err
-	case <-w.ctx.Done():
-		return ErrWriteChanFull
 	}
 }
 

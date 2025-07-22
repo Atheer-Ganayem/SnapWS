@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+type BackpressureStrategy int
+
+const (
+	BackpressureClose BackpressureStrategy = iota
+	BackpressureDrop
+	BackpressureWait
+)
+
 const (
 	defaultWriteWait = time.Second * 5
 	defaultReadWait  = time.Minute
@@ -20,7 +28,7 @@ const (
 	DefaultOutboundControl = 4
 )
 
-type Args[KeyType comparable] struct {
+type Options[KeyType comparable] struct {
 	// Ran before finalizing and accepting the handshake.
 	Middlwares []Middlware
 	// Ran when the connection finalizes.
@@ -49,6 +57,7 @@ type Args[KeyType comparable] struct {
 	WriteBufferSize int
 
 	// the size of iboundFrames chan buffer, if not set it will default to 32
+	// Note: if the consumer is too slow and the channel gets full, the connection will be droped.
 	InboundFramesSize int
 	// the size of iboundMessages chan buffer, if not set it will default to 8
 	InboundMessagesSize int
@@ -62,7 +71,7 @@ type Args[KeyType comparable] struct {
 	SubProtocols []string
 	// rejectRaw determines whether to reject clients that do not propose any matching
 	// sub-protocols. If set to true, the connection will be rejected when:
-	//   - The client does not include any Sec-WebSocket-Protocol header,
+	//   - The client does not include any Sec-WebSocket-Protocol header.
 	//   - Or none of the client's protocols match the supported subProtocols list.
 	//
 	// If false, such connections will be accepted as raw WebSocket connections.
@@ -72,36 +81,62 @@ type Args[KeyType comparable] struct {
 	// used during broadcasting. It receives the number of connections and returns the desired worker count.
 	// If nil, the default is (connsLength / 10) + 2.
 	BroadcastWorkers func(connsLength int) int
+
+	// BackpressureStrategy controls the behavior when the messages channel is full:
+	// 	- snapws.BackpressureClose (default): when the messages channel is full the connection will close.
+	// 	- snapws.BackpressureDrop: when the messages channel is full the message will be droped.
+	// 	- snapws.BackpressureWait: when the messages channel is full the reading loop will block
+	// 	until it succeeds to send the message.
+	//
+	// Note: when the inobundFrames channel is full, the connection will be closed.
+	BackpressureStrategy BackpressureStrategy
 }
 
-func (args *Args[KeyType]) WithDefault() {
-	if args.WriteWait == 0 {
-		args.WriteWait = defaultWriteWait
+func (opt *Options[KeyType]) WithDefault() {
+	if opt.WriteWait == 0 {
+		opt.WriteWait = defaultWriteWait
 	}
-	if args.ReadWait == 0 {
-		args.ReadWait = defaultReadWait
+	if opt.ReadWait == 0 {
+		opt.ReadWait = defaultReadWait
 	}
-	if args.PingEvery == 0 {
-		args.PingEvery = defaultPingEvery
+	if opt.PingEvery == 0 {
+		opt.PingEvery = defaultPingEvery
 	}
-	if args.MaxMessageSize == 0 {
-		args.MaxMessageSize = DefaultMaxMessageSize
+	if opt.MaxMessageSize == 0 {
+		opt.MaxMessageSize = DefaultMaxMessageSize
 	}
-	if args.ReadBufferSize == 0 {
-		args.ReadBufferSize = DefaultReadBufferSize
+	if opt.ReadBufferSize == 0 {
+		opt.ReadBufferSize = DefaultReadBufferSize
 	}
-	if args.WriteBufferSize == 0 {
-		args.WriteBufferSize = DefaultWriteBufferSize
+	if opt.WriteBufferSize == 0 {
+		opt.WriteBufferSize = DefaultWriteBufferSize
 	}
 
-	if args.InboundFramesSize == 0 {
-		args.InboundFramesSize = DefaultInboundFrames
+	if opt.InboundFramesSize == 0 {
+		opt.InboundFramesSize = DefaultInboundFrames
 	}
-	if args.InboundMessagesSize == 0 {
-		args.InboundMessagesSize = DefaultInboundMessages
+	if opt.InboundMessagesSize == 0 {
+		opt.InboundMessagesSize = DefaultInboundMessages
 	}
-	if args.OutboundControlSize == 0 {
-		args.OutboundControlSize = DefaultOutboundControl
+	if opt.OutboundControlSize == 0 {
+		opt.OutboundControlSize = DefaultOutboundControl
+	}
+
+	if !opt.BackpressureStrategy.Valid() {
+		opt.BackpressureStrategy = BackpressureClose
+	}
+}
+
+func (s BackpressureStrategy) Valid() bool {
+	switch s {
+	case BackpressureClose:
+		return true
+	case BackpressureDrop:
+		return true
+	case BackpressureWait:
+		return true
+	default:
+		return false
 	}
 }
 
