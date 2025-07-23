@@ -31,7 +31,7 @@ func (conn *Conn[KeyType]) readLoop() {
 			return
 		case conn.inboundFrames <- frame:
 		default:
-			conn.closeWithCode(ClosePolicyViolation, "inboundFrames full — slow consumer")
+			conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
 			return
 		}
 	}
@@ -146,11 +146,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 		message := &Message{OPCODE: frame.OPCODE, Payload: bytes.NewBuffer(frame.Payload())}
 
 		if frame.FIN {
-			select {
-			case <-conn.done:
-				return
-			case conn.inboundMessages <- message:
-			}
+			conn.sendMessageToChan(message)
 			continue
 		}
 
@@ -188,11 +184,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			conn.closeWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
 			return
 		}
-
-		select {
-		case <-conn.done:
-		case conn.inboundMessages <- message:
-		}
+		conn.sendMessageToChan(message)
 	}
 }
 

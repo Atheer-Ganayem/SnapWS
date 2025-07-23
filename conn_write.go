@@ -302,6 +302,8 @@ func (conn *Conn[Key]) Ping() error {
 		errCh: errCh,
 		ctx:   nil,
 	}:
+	default:
+		return Fatal(ErrSlowConsumer)
 	}
 
 	err = <-errCh
@@ -328,6 +330,9 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 	case <-conn.done:
 		return
 	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
+	default:
+		conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+		return
 	}
 
 	err = <-errCh

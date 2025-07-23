@@ -69,4 +69,5 @@ var (
 	ErrInsufficientHeaderSpace = errors.New("no enough space to write headers")
 
 	ErrInternalServer = errors.New("something went wrong")
+	ErrSlowConsumer   = errors.New("slow consumer/client")
 )

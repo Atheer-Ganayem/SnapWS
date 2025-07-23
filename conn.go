@@ -44,6 +44,26 @@ type SendFrameRequest struct {
 	ctx   context.Context
 }
 
+func (conn *Conn[KeyType]) sendMessageToChan(m *Message) {
+	select {
+	case <-conn.done:
+		switch conn.Manager.BackpressureStrategy {
+		case BackpressureClose:
+			conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+			return
+		case BackpressureDrop:
+			return
+		case BackpressureWait:
+			select {
+			case <-conn.done:
+			case conn.inboundMessages <- m:
+			}
+			return
+		}
+	case conn.inboundMessages <- m:
+	}
+}
+
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
 	conn := &Conn[KeyType]{
 		raw:         c,
@@ -141,7 +161,7 @@ func (conn *Conn[KeyType]) pingLoop() {
 	for range conn.ticker.C {
 		err := conn.Ping()
 		if err != nil {
-			conn.closeWithCode(ClosePolicyViolation, "failed to ping")
+			conn.closeWithCode(ClosePolicyViolation, err.Error())
 			return
 		}
 	}
