@@ -90,6 +90,7 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 	if w.closed {
 		return 0, ErrWriterClosed
 	}
+
 	for n < len(p) {
 		if w.used == len(w.buf) {
 			if err := w.Flush(false); err != nil {
@@ -109,7 +110,16 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 }
 
 // Flush sends the current buffer as a WebSocket frame.
-// If FIN is true, marks this as the final frame in the message.
+// If FIN is true, this frame is marked as the final one in the message.
+//
+// Return values:
+//   - If it returns a **fatal error**, the connection is closed and cannot be reused.
+//   - If it returns a **non-fatal, non-nil error**, the connection is still alive,
+//     and you may attempt to flush again.
+//     note: If err == context.Canceled or DeadlineExceeded, connection is alive but ctx is done.
+//     No point in retrying.
+//   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
+//     positions have been reset.
 func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	if w.conn.isClosed.Load() {
 		return Fatal(ErrChannelClosed)
@@ -131,12 +141,6 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return err
 	}
 
-	defer func() {
-		w.flushCount++
-		w.used = 14
-		w.start = 14
-	}()
-
 	select {
 	case <-w.conn.done:
 		return Fatal(ErrChannelClosed)
@@ -154,6 +158,11 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		}
 		if IsFatalErr(err) {
 			w.conn.closeWithCode(CloseInternalServerErr, err.Error())
+		}
+		if err == nil {
+			w.flushCount++
+			w.used = 14
+			w.start = 14
 		}
 		return err
 	}

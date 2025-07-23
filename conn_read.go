@@ -188,6 +188,28 @@ func (conn *Conn[KeyType]) acceptMessage() {
 	}
 }
 
+// NextReader returns an io.Reader for the next complete WebSocket message.
+// It blocks until a full message is available or the context is canceled.
+// The returned reader allows streaming the message payload frame-by-frame,
+// and the second return value indicates the message type (e.g., Text or Binary).
+// If the connection is closed or the context expires, it returns a non-nil error.
+func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, error) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, -1, ctx.Err()
+	case message, ok := <-conn.inboundMessages:
+		if !ok {
+			return nil, -1, Fatal(ErrConnClosed)
+		}
+		// there is alway at least 1 element in inbound messages
+		return &ConnReader{message: message}, int8(message.OPCODE), nil
+	}
+}
+
 // Read reads data from the current frame group (message) into the provided byte slice `p`.
 // It reads sequentially across multiple frames if needed, until `p` is full or EOF is reached.
 // Returns the number of bytes read and any error encountered.
@@ -222,28 +244,6 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 
 func (r *ConnReader) Payload() []byte {
 	return r.message.Payload.Bytes()
-}
-
-// NextReader returns an io.Reader for the next complete WebSocket message.
-// It blocks until a full message is available or the context is canceled.
-// The returned reader allows streaming the message payload frame-by-frame,
-// and the second return value indicates the message type (e.g., Text or Binary).
-// If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, error) {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
-	select {
-	case <-ctx.Done():
-		return nil, -1, ctx.Err()
-	case message, ok := <-conn.inboundMessages:
-		if !ok {
-			return nil, -1, Fatal(ErrConnClosed)
-		}
-		// there is alway at least 1 element in inbound messages
-		return &ConnReader{message: message}, int8(message.OPCODE), nil
-	}
 }
 
 // ReadMessage reads the next complete WebSocket message into memory.
