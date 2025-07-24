@@ -33,6 +33,7 @@ type Conn[KeyType comparable] struct {
 	// used for sending control frames.
 	outboundControl chan *SendFrameRequest
 
+	reader ConnReader[KeyType]
 	writer *ConnWriter[KeyType]
 
 	readFrameBuf []byte
@@ -42,26 +43,6 @@ type SendFrameRequest struct {
 	frame *Frame
 	errCh chan error
 	ctx   context.Context
-}
-
-func (conn *Conn[KeyType]) sendMessageToChan(m *Message) {
-	select {
-	case <-conn.done:
-		switch conn.Manager.BackpressureStrategy {
-		case BackpressureClose:
-			conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
-			return
-		case BackpressureDrop:
-			return
-		case BackpressureWait:
-			select {
-			case <-conn.done:
-			case conn.inboundMessages <- m:
-			}
-			return
-		}
-	case conn.inboundMessages <- m:
-	}
 }
 
 func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) *Conn[KeyType] {
@@ -81,8 +62,30 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		readFrameBuf: make([]byte, m.ReadBufferSize),
 	}
 
+	conn.reader = ConnReader[KeyType]{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText)
 	return conn
+}
+
+func (conn *Conn[KeyType]) sendMessageToChan(m *Message) {
+	select {
+	case <-conn.done:
+	case conn.inboundMessages <- m:
+	default:
+		switch conn.Manager.BackpressureStrategy {
+		case BackpressureClose:
+			conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+			return
+		case BackpressureDrop:
+			return
+		case BackpressureWait:
+			select {
+			case <-conn.done:
+			case conn.inboundMessages <- m:
+			}
+			return
+		}
+	}
 }
 
 // Locks "wLock" indicating that a writer has been intiated.
@@ -171,6 +174,7 @@ func (conn *Conn[KeyType]) pingLoop() {
 // closeWithCode closes the connection with the given code and reason.
 func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
+		close(conn.done)
 		buf := new(bytes.Buffer)
 		_ = binary.Write(buf, binary.BigEndian, code)
 		buf.WriteString(reason)
@@ -200,7 +204,6 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
-		close(conn.done)
 		close(conn.writer.sig)
 		close(conn.outboundControl)
 		close(conn.inboundMessages)

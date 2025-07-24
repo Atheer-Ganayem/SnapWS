@@ -10,7 +10,8 @@ import (
 
 // ConnReader provides an io.Reader interface over a websocket message (frame group).
 // It supports reading fragmented frames as a single continuous stream.
-type ConnReader struct {
+type ConnReader[KeyType comparable] struct {
+	conn    *Conn[KeyType]
 	message *Message // Group of frames making up the complete message
 	eof     bool     // Indicates if all frames have been fully read
 }
@@ -193,7 +194,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
 // If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, error) {
+func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader[KeyType], int8, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -205,8 +206,10 @@ func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, e
 		if !ok {
 			return nil, -1, Fatal(ErrConnClosed)
 		}
-		// there is alway at least 1 element in inbound messages
-		return &ConnReader{message: message}, int8(message.OPCODE), nil
+
+		conn.reader.eof = false
+		conn.reader.message = message
+		return &conn.reader, int8(message.OPCODE), nil
 	}
 }
 
@@ -214,7 +217,7 @@ func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader, int8, e
 // It reads sequentially across multiple frames if needed, until `p` is full or EOF is reached.
 // Returns the number of bytes read and any error encountered.
 // When all frames are fully consumed, it returns io.EOF.
-func (r *ConnReader) Read(p []byte) (n int, err error) {
+func (r *ConnReader[KeyType]) Read(p []byte) (n int, err error) {
 	if r.eof {
 		return 0, io.EOF
 	}
@@ -242,7 +245,7 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (r *ConnReader) Payload() []byte {
+func (r *ConnReader[KeyType]) Payload() []byte {
 	return r.message.Payload.Bytes()
 }
 
