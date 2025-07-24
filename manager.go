@@ -38,12 +38,7 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 		return nil, err
 	}
 
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		return nil, ErrHijackerNotSupported
-	}
-
-	c, _, err := hj.Hijack()
+	c, _, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		return nil, err
 	}
