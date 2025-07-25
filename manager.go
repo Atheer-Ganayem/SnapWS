@@ -33,12 +33,7 @@ func NewManager[KeyType comparable](args *Options[KeyType]) *Manager[KeyType] {
 }
 
 func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*Conn[KeyType], error) {
-	subProtocol, err := m.handShake(w, r)
-	if err != nil {
-		return nil, err
-	}
-
-	c, _, err := http.NewResponseController(w).Hijack()
+	c, subProtocol, err := m.handShake(w, r)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package snapws
 import (
 	"crypto/sha1"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -10,27 +11,27 @@ import (
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (string, error) {
+func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (net.Conn, string, error) {
 	if r.Method != http.MethodGet {
-		return "", ErrWrongMethod
+		return nil, "", ErrWrongMethod
 	}
 
 	if err := validateUpgradeHeader(r); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := validateConnectionHeader(r); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := validateVersionHeader(r); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := validatedSecKeyHeader(r); err != nil {
-		return "", err
+		return nil, "", err
 	}
 
 	subProtocol := ChooseSubProtocol(r, m.SubProtocols)
 	if subProtocol == "" && m.RejectRaw {
-		return "", ErrNotSupportedSubProtocols
+		return nil, "", ErrNotSupportedSubProtocols
 	}
 
 	hashedKey := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + GUID))
@@ -39,20 +40,35 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (st
 	if m.Middlwares != nil {
 		for _, middleware := range m.Middlwares {
 			if err := middleware(w, r); err != nil {
-				return "", err
+				return nil, "", err
 			}
 		}
 	}
 
-	if subProtocol != "" {
-		w.Header().Set("Sec-WebSocket-Protocol", subProtocol)
+	///
+	c, brw, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		return nil, "", err
 	}
-	w.Header().Set("Upgrade", "websocket")
-	w.Header().Set("Connection", "Upgrade")
-	w.Header().Set("Sec-WebSocket-Accept", secAcceptKey)
-	w.WriteHeader(http.StatusSwitchingProtocols)
 
-	return subProtocol, nil
+	p := brw.Writer.AvailableBuffer()
+
+	p = append(p, "HTTP/1.1 101 Switching Protocols\r\n"...)
+	p = append(p, "Upgrade: websocket\r\n"...)
+	p = append(p, "Connection: Upgrade\r\n"...)
+	p = append(p, "Sec-WebSocket-Accept: "...)
+	p = append(p, secAcceptKey...)
+	p = append(p, "\r\n"...)
+	if subProtocol != "" {
+		p = append(p, "Sec-WebSocket-Protocol: "...)
+		p = append(p, subProtocol...)
+		p = append(p, "\r\n"...)
+	}
+	p = append(p, "\r\n"...)
+
+	_, err = c.Write(p)
+
+	return c, subProtocol, err
 }
 
 func validateConnectionHeader(r *http.Request) error {
