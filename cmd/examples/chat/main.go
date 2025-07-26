@@ -55,11 +55,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if name == "" {
-		return snapws.NewHttpErr(http.StatusBadRequest, "username cannot be empty.")
+		return snapws.NewMiddlewareErr(http.StatusBadRequest, "username cannot be empty.")
 	}
 	_, exists := manager.GetConn(name)
 	if exists {
-		return snapws.NewHttpErr(http.StatusBadRequest, "username already exists, choose another one.")
+		return snapws.NewMiddlewareErr(http.StatusBadRequest, "username already exists, choose another one.")
 	}
 
 	return nil

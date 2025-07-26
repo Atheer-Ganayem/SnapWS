@@ -140,30 +140,28 @@ func (s BackpressureStrategy) Valid() bool {
 	}
 }
 
-// If an error returns the connection wont be accepted.
-// The functions are ran by their order in the slice.
 type Middlwares []Middlware
+
+// A function representing a middleware that will be ran after validating the websocket upgrade request
+// and before switching protocols.
+// If an error returns the connection wont be accepted.
+// It is prefered to return an error of type snapws.MiddlewareErr.
 type Middlware func(w http.ResponseWriter, r *http.Request) error
 
-type HttpErr struct {
+type MiddlewareErr struct {
 	Code    int
 	Message string
-	IsJson  bool
 }
 
-func AsHttpErr(err error) (*HttpErr, bool) {
-	e, ok := err.(*HttpErr)
+func AsMiddlewareErr(err error) (*MiddlewareErr, bool) {
+	e, ok := err.(*MiddlewareErr)
 	return e, ok
 }
 
-func (err *HttpErr) Error() string {
+func (err *MiddlewareErr) Error() string {
 	return err.Message
 }
 
-func NewHttpErr(code int, message string) *HttpErr {
-	return &HttpErr{Code: code, Message: message, IsJson: false}
-}
-
-func NewHttpJSONErr(code int, message string) *HttpErr {
-	return &HttpErr{Code: code, Message: message, IsJson: true}
+func NewMiddlewareErr(code int, message string) *MiddlewareErr {
+	return &MiddlewareErr{Code: code, Message: message}
 }

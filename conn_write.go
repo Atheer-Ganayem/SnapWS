@@ -59,7 +59,7 @@ func (w *ConnWriter[KeyType]) reset(ctx context.Context, opcode uint8) {
 // again, you must give it a new context.
 func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter[KeyType], error) {
 	if conn.isClosed.Load() {
-		return nil, Fatal(ErrConnClosed)
+		return nil, fatal(ErrConnClosed)
 	}
 	if conn.writer == nil {
 		return nil, ErrWriterUnintialized
@@ -122,7 +122,7 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 //     positions have been reset.
 func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	if w.conn.isClosed.Load() {
-		return Fatal(ErrChannelClosed)
+		return fatal(ErrChannelClosed)
 	}
 	if w == nil {
 		return ErrWriterUnintialized
@@ -143,7 +143,7 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 
 	select {
 	case <-w.conn.done:
-		return Fatal(ErrChannelClosed)
+		return fatal(ErrChannelClosed)
 	case <-w.ctx.Done():
 		return w.ctx.Err()
 	case w.sig <- struct{}{}:
@@ -154,10 +154,10 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return w.ctx.Err()
 	case err, ok := <-w.errCh:
 		if !ok {
-			return Fatal(ErrChannelClosed)
+			return fatal(ErrChannelClosed)
 		}
 		if IsFatalErr(err) {
-			w.conn.closeWithCode(CloseInternalServerErr, err.Error())
+			w.conn.CloseWithCode(CloseInternalServerErr, err.Error())
 		}
 		if err == nil {
 			w.flushCount++
@@ -190,7 +190,7 @@ func trySendErr(errCh chan error, err error) {
 func (conn *Conn[KeyType]) sendFrame(buf []byte) error {
 	err := conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
 	if err != nil {
-		return Fatal(err)
+		return fatal(err)
 	}
 
 	written := 0
@@ -198,7 +198,7 @@ func (conn *Conn[KeyType]) sendFrame(buf []byte) error {
 	for written < len(buf) {
 		n, err := conn.raw.Write(buf[written:])
 		if err != nil {
-			return Fatal(err)
+			return fatal(err)
 		}
 		written += n
 	}
@@ -294,10 +294,10 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 // to habdle them manually.
 func (conn *Conn[Key]) Ping() error {
 	if conn.isClosed.Load() {
-		return Fatal(ErrConnClosed)
+		return fatal(ErrConnClosed)
 	}
 
-	frame, err := NewFrame(true, OpcodePing, false, nil)
+	frame, err := newFrame(true, OpcodePing, false, nil)
 	if err != nil {
 		return err
 	}
@@ -305,14 +305,14 @@ func (conn *Conn[Key]) Ping() error {
 	errCh := make(chan error)
 	select {
 	case <-conn.done:
-		return Fatal(ErrConnClosed)
+		return fatal(ErrConnClosed)
 	case conn.outboundControl <- &SendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
 		ctx:   nil,
 	}:
 	default:
-		return Fatal(ErrSlowConsumer)
+		return fatal(ErrSlowConsumer)
 	}
 
 	err = <-errCh
@@ -328,9 +328,9 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 		return
 	}
 
-	frame, err := NewFrame(true, OpcodePong, false, payload)
+	frame, err := newFrame(true, OpcodePong, false, payload)
 	if err != nil {
-		conn.closeWithCode(CloseInternalServerErr, "faild to create pong frame")
+		conn.CloseWithCode(CloseInternalServerErr, "faild to create pong frame")
 		return
 	}
 
@@ -340,13 +340,13 @@ func (conn *Conn[KeyType]) Pong(payload []byte) {
 		return
 	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
 	default:
-		conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+		conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
 		return
 	}
 
 	err = <-errCh
 	if IsFatalErr(err) {
-		conn.closeWithCode(CloseInternalServerErr, err.Error())
+		conn.CloseWithCode(CloseInternalServerErr, err.Error())
 		return
 	}
 }

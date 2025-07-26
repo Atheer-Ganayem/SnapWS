@@ -36,7 +36,7 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 	}
 
 	// selecting a subprotocol
-	subProtocol := ChooseSubProtocol(r, m.SubProtocols)
+	subProtocol := selectSubProtocol(r, m.SubProtocols)
 	if subProtocol == "" && m.RejectRaw {
 		http.Error(w, "unsupported or missing subprotocol", http.StatusBadRequest)
 		return nil, "", ErrNotSupportedSubProtocols
@@ -46,7 +46,10 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 	if m.Middlwares != nil {
 		for _, middleware := range m.Middlwares {
 			if err := middleware(w, r); err != nil {
-				http.Error(w, "middleware error: "+err.Error(), http.StatusBadRequest)
+				if mwErr, ok := AsMiddlewareErr(err); ok {
+					http.Error(w, mwErr.Message, mwErr.Code)
+				}
+				http.Error(w, "middleware error", http.StatusBadRequest)
 				return nil, "", err
 			}
 		}
@@ -143,7 +146,7 @@ func validatedSecKeyHeader(r *http.Request) error {
 	return nil
 }
 
-func ChooseSubProtocol(r *http.Request, subProtocols []string) string {
+func selectSubProtocol(r *http.Request, subProtocols []string) string {
 	if subProtocols == nil {
 		return ""
 	}

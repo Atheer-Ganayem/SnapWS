@@ -90,19 +90,4 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ## API Reference
 
-### 📦 Manager
-
-The `Manager` is the central controller that coordinates all active WebSocket connections.
-
-It is designed to be shared across your application (typically as a singleton), and provides a powerful API for managing:
-
-- ✅ Connected clients
-- 🔄 Message broadcasting
-- ⚡ Event hooks (`OnConnect`, `OnDisconnect`, etc.)
-- 🧠 Middleware and custom logic
-- ⏱️ Configurable durations (e.g., timeouts, pings)
-- 📦 Configurable buffer sizes, and many other things via the `snapws.Options`.
-
-You can customize behavior via the `snapws.Options` struct when creating a new `Manager`, giving you fine-grained control over performance, memory usage, and connection behavior.
-
-> Behind the scenes, `Manager` ensures that each client is tracked, cleaned up when disconnected, and integrated with your application logic via hooks and middleware.
+https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS

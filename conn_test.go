@@ -222,12 +222,12 @@ func BenchmarkWriter_EmptyFlush(b *testing.B) {
 // --- Dummy Reader Setup ---
 
 // simulate a fully read message with a buffer of certain size
-func newTestMessage(size int) *Message {
+func newTestMessage(size int) *message {
 	payload := bytes.NewBuffer(make([]byte, size))
 	for i := 0; i < size; i++ {
 		payload.Bytes()[i] = byte(i % 256)
 	}
-	return &Message{
+	return &message{
 		OPCODE:  OpcodeBinary,
 		Payload: payload,
 	}
@@ -348,8 +348,8 @@ func BenchmarkAcceptFrame(b *testing.B) {
 
 		payload := []byte("hello")
 		// payload := make([]byte, 8192)
-		frame, _ := NewFrame(true, OpcodeText, true, payload)
-		frame.Mask()
+		frame, _ := newFrame(true, OpcodeText, true, payload)
+		frame.mask()
 		c := make([]byte, len(frame.Encoded))
 
 		for i := 0; i < b.N; i++ {
@@ -373,7 +373,7 @@ func BenchmarkAcceptFrame(b *testing.B) {
 		if err != nil {
 			b.Fatalf("acceptFrame failed: %v", err)
 		}
-		if code != 0 || !bytes.Equal(frame.Payload(), []byte("hello")) {
+		if code != 0 || !bytes.Equal(frame.payload(), []byte("hello")) {
 			b.Fatalf("unexpected frame data")
 		}
 	}
@@ -389,8 +389,8 @@ func BenchmarkAcceptMessage(b *testing.B) {
 	go func() {
 		defer s2.Close()
 		payload := []byte("hello")
-		frame, _ := NewFrame(true, OpcodeText, true, payload)
-		frame.Mask()
+		frame, _ := newFrame(true, OpcodeText, true, payload)
+		frame.mask()
 		c := make([]byte, len(frame.Encoded))
 
 		for i := 0; i < b.N; i++ {

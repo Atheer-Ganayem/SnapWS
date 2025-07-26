@@ -12,6 +12,7 @@ func (e *FatalError) Error() string {
 	return e.Err.Error()
 }
 
+// Check if the given error is of type FatalError.
 func IsFatalErr(err error) bool {
 	if err == nil {
 		return false
@@ -21,7 +22,7 @@ func IsFatalErr(err error) bool {
 	return ok
 }
 
-func Fatal(err error) error {
+func fatal(err error) error {
 	if err == nil {
 		return nil
 	}

@@ -35,7 +35,7 @@ const (
 
 const MaxHeaderSize = 14
 
-type Frame struct {
+type frame struct {
 	FIN           bool
 	OPCODE        uint8
 	PayloadLength int
@@ -45,13 +45,13 @@ type Frame struct {
 	PayloadOffset int
 }
 
-type Message struct {
+type message struct {
 	OPCODE  uint8
 	Payload *bytes.Buffer
 }
 
-func NewFrame(FIN bool, OPCODE uint8, isMasked bool, payload []byte) (Frame, error) {
-	frame := Frame{
+func newFrame(FIN bool, OPCODE uint8, isMasked bool, payload []byte) (frame, error) {
+	frame := frame{
 		FIN:      FIN,
 		OPCODE:   OPCODE,
 		IsMasked: isMasked,
@@ -60,7 +60,7 @@ func NewFrame(FIN bool, OPCODE uint8, isMasked bool, payload []byte) (Frame, err
 	if payload != nil {
 		frame.PayloadLength = len(payload)
 	}
-	err := frame.Encode()
+	err := frame.encode()
 	frame.Encoded = append(frame.Encoded, payload...)
 
 	return frame, err
@@ -69,12 +69,12 @@ func NewFrame(FIN bool, OPCODE uint8, isMasked bool, payload []byte) (Frame, err
 // Reads a slice of bytes into a frame and returns the pointer.
 // If the frame is masked, it will unmask it.
 // Note: the payload is copied, not refrenced to the slice.
-func ReadFrame(raw []byte) (*Frame, error) {
+func readFrame(raw []byte) (*frame, error) {
 	if len(raw) < 2 {
 		return nil, errors.New("-incomplete header (need at least 2 bytes)")
 	}
 
-	frame := &Frame{}
+	frame := &frame{}
 	frame.FIN = raw[0]&0b10000000 != 0
 	frame.OPCODE = raw[0] & 0b00001111
 	frame.IsMasked = raw[1]&0b10000000 != 0
@@ -121,7 +121,7 @@ func ReadFrame(raw []byte) (*Frame, error) {
 // Returns int, a value of the offset where the "length bytes" end.
 // Also returns an error of a confilict happened (eg: bytes less than 2, length byte is 126
 // but the total bytes are less than 4, etc...)
-func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
+func (frame *frame) parsePayloadLength(raw []byte) (int, error) {
 	if len(raw) < 2 {
 		return -1, errors.New("--incomplete header (need at least 2 bytes)")
 	}
@@ -152,7 +152,7 @@ func (frame *Frame) parsePayloadLength(raw []byte) (int, error) {
 	return offset, nil
 }
 
-func (f *Frame) CalcLength() int {
+func (f *frame) calcLength() int {
 	length := 2 + f.PayloadLength
 
 	if f.IsMasked {
@@ -171,8 +171,8 @@ func (f *Frame) CalcLength() int {
 	return length
 }
 
-func (f *Frame) Encode() error {
-	length := f.CalcLength()
+func (f *frame) encode() error {
+	length := f.calcLength()
 	if cap(f.Encoded) < length {
 		f.Encoded = make([]byte, 2, length)
 	}
@@ -212,7 +212,7 @@ func (f *Frame) Encode() error {
 	return nil
 }
 
-func (f *Frame) Mask() {
+func (f *frame) mask() {
 	if !f.IsMasked {
 		return
 	}
@@ -234,7 +234,7 @@ func readLength(b []byte) (int, error) {
 	isMasked := b[1]&0b10000000 != 0
 	payloadLen := int(b[1] & 0b01111111)
 	if payloadLen < 0 {
-		return -1, Fatal(ErrInvalidPayloadLength)
+		return -1, fatal(ErrInvalidPayloadLength)
 	}
 
 	total := 2
@@ -255,7 +255,7 @@ func readLength(b []byte) (int, error) {
 		}
 		length64 := binary.BigEndian.Uint64(b[2:10])
 		if length64 > math.MaxInt32 {
-			return -1, Fatal(ErrTooLargePayload)
+			return -1, fatal(ErrTooLargePayload)
 		}
 		total += int(length64) + 8
 	}
@@ -296,38 +296,34 @@ func (w *ConnWriter[KeyType]) writeHeaders(FIN bool, OPCODE uint8) error {
 	return nil
 }
 
-func (frame *Frame) Payload() []byte {
+func (frame *frame) payload() []byte {
 	return frame.Encoded[frame.PayloadOffset : frame.PayloadOffset+frame.PayloadLength]
 }
 
-func (frame *Frame) isValidOpcode() bool {
-	return frame.OPCODE == OpcodeBinary || frame.IsText() || frame.IsControl()
+func (frame *frame) isValidOpcode() bool {
+	return frame.OPCODE == OpcodeBinary || frame.isText() || frame.isControl()
 }
 
-func (frame *Frame) IsText() bool {
+func (frame *frame) isText() bool {
 	return frame.OPCODE == OpcodeText
 }
 
-func (frame *Frame) IsControl() bool {
+func (frame *frame) isControl() bool {
 	return frame.OPCODE == OpcodeClose || frame.OPCODE == OpcodePing || frame.OPCODE == OpcodePong
 }
 
-func (frame *Frame) IsValidControl() bool {
-	return frame.FIN && frame.IsControl() && frame.PayloadLength < 126
+func (frame *frame) isValidControl() bool {
+	return frame.FIN && frame.isControl() && frame.PayloadLength < 126
 }
 
-func (message *Message) IsValidUTF8() bool {
+func (message *message) isValidUTF8() bool {
 	return utf8.Valid(message.Payload.Bytes())
 }
 
-func (message *Message) IsBinary() bool {
-	return message.OPCODE == OpcodeBinary
-}
-
-func (message *Message) IsText() bool {
+func (message *message) isText() bool {
 	return message.OPCODE == OpcodeText
 }
 
-func IsValidCloseCode(code uint16) bool {
+func isValidCloseCode(code uint16) bool {
 	return slices.Contains(allowedCodes, code)
 }

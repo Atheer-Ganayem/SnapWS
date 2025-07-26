@@ -25,8 +25,8 @@ type Conn[KeyType comparable] struct {
 	closeOnce sync.Once
 	// Empty string means its a raw websocket
 
-	inboundFrames   chan *Frame
-	inboundMessages chan *Message
+	inboundFrames   chan *frame
+	inboundMessages chan *message
 	// ticker for ping loop
 	ticker *time.Ticker
 
@@ -40,7 +40,7 @@ type Conn[KeyType comparable] struct {
 }
 
 type SendFrameRequest struct {
-	frame *Frame
+	frame *frame
 	errCh chan error
 	ctx   context.Context
 }
@@ -54,8 +54,8 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 		done:        make(chan struct{}),
 		ticker:      time.NewTicker(m.PingEvery),
 
-		inboundFrames:   make(chan *Frame, m.InboundFramesSize),
-		inboundMessages: make(chan *Message, m.InboundMessagesSize),
+		inboundFrames:   make(chan *frame, m.InboundFramesSize),
+		inboundMessages: make(chan *message, m.InboundMessagesSize),
 
 		outboundControl: make(chan *SendFrameRequest, m.OutboundControlSize),
 
@@ -67,14 +67,14 @@ func (m *Manager[KeyType]) newConn(c net.Conn, key KeyType, subProtocol string) 
 	return conn
 }
 
-func (conn *Conn[KeyType]) sendMessageToChan(m *Message) {
+func (conn *Conn[KeyType]) sendMessageToChan(m *message) {
 	select {
 	case <-conn.done:
 	case conn.inboundMessages <- m:
 	default:
 		switch conn.Manager.BackpressureStrategy {
 		case BackpressureClose:
-			conn.closeWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+			conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
 			return
 		case BackpressureDrop:
 			return
@@ -94,7 +94,7 @@ func (conn *Conn[KeyType]) sendMessageToChan(m *Message) {
 func (conn *Conn[KeyType]) lockW(ctx context.Context) error {
 	select {
 	case <-conn.done:
-		return Fatal(ErrConnClosed)
+		return fatal(ErrConnClosed)
 	case conn.writer.lock <- struct{}{}:
 		return nil
 	case <-ctx.Done():
@@ -109,7 +109,7 @@ func (conn *Conn[KeyType]) unlockW() error {
 	select {
 	case _, ok := <-conn.writer.lock:
 		if !ok {
-			return Fatal(ErrChannelClosed)
+			return fatal(ErrChannelClosed)
 		}
 		return nil
 	default:
@@ -139,7 +139,7 @@ func (conn *Conn[KeyType]) listen() {
 		case _, ok := <-conn.writer.sig:
 			if !ok {
 				if conn.writer != nil {
-					trySendErr(conn.writer.errCh, Fatal(ErrChannelClosed))
+					trySendErr(conn.writer.errCh, fatal(ErrChannelClosed))
 				}
 				return
 			}
@@ -164,15 +164,15 @@ func (conn *Conn[KeyType]) pingLoop() {
 	for range conn.ticker.C {
 		err := conn.Ping()
 		if err != nil {
-			conn.closeWithCode(ClosePolicyViolation, err.Error())
+			conn.CloseWithCode(ClosePolicyViolation, err.Error())
 			return
 		}
 	}
 
 }
 
-// closeWithCode closes the connection with the given code and reason.
-func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
+// CloseWithCode closes the connection with the given code and reason.
+func (conn *Conn[KeyType]) CloseWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
 		close(conn.done)
 		buf := new(bytes.Buffer)
@@ -180,7 +180,7 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 		buf.WriteString(reason)
 		payload := buf.Bytes()
 
-		frame, err := NewFrame(true, OpcodeClose, false, payload)
+		frame, err := newFrame(true, OpcodeClose, false, payload)
 
 		errCh := make(chan error)
 		if err == nil && !conn.isClosed.Load() {
@@ -217,29 +217,29 @@ func (conn *Conn[KeyType]) closeWithCode(code uint16, reason string) {
 // The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
 // The rest of the payload is optional, represnting a UTF-8 reason.
 // Any violations would cause a close with CloseProtocolError with the apropiate reason.
-func (conn *Conn[KeyType]) closeWithPayload(payload []byte) {
+func (conn *Conn[KeyType]) CloseWithPayload(payload []byte) {
 	if len(payload) < 2 {
-		conn.closeWithCode(CloseProtocolError, "invalid close frame payload")
+		conn.CloseWithCode(CloseProtocolError, "invalid close frame payload")
 		return
 	}
 	code := binary.BigEndian.Uint16(payload[:2])
-	if !IsValidCloseCode(code) {
-		conn.closeWithCode(CloseProtocolError, "invalid close code")
+	if !isValidCloseCode(code) {
+		conn.CloseWithCode(CloseProtocolError, "invalid close code")
 		return
 	}
 
 	if len(payload) > 2 {
 		if !utf8.Valid(payload[2:]) {
-			conn.closeWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
+			conn.CloseWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
 			return
 		}
-		conn.closeWithCode(code, string(payload[2:]))
+		conn.CloseWithCode(code, string(payload[2:]))
 	} else {
-		conn.closeWithCode(code, "")
+		conn.CloseWithCode(code, "")
 	}
 }
 
 // Closes the conn normaly.
 func (conn *Conn[KeyType]) Close() {
-	conn.closeWithCode(CloseNormalClosure, "Normal close")
+	conn.CloseWithCode(CloseNormalClosure, "Normal close")
 }
