@@ -1,10 +1,12 @@
 # snapws
 
-![Go Version](https://img.shields.io/badge/go-%3E=1.18-blue)
-![License](https://img.shields.io/github/license/yourusername/snapws)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Atheer-Ganayem/SnapWS.svg)](https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS)
+![License](https://img.shields.io/github/license/Atheer-Ganayem/SnapWS)
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 
-A WebSocket library for Go, designed to make working with WebSockets **simple, intuitive, and minimal** — especially for developers who **just want it to work** without having to manage ping/pong, connection safety, or concurrency manually.
+**SnapWS is a minimal WebSocket library for Go.**
+
+It takes care of ping/pong, close frames, connection safety, and lifecycle management so you can just connect, read, and write — without boilerplate or extra complexity.
 
 > 🚧 **UNDER DEVELOPMENT** 🚧  
 > This library is not yet production-ready. Expect breaking changes as development continues.
@@ -18,12 +20,12 @@ A WebSocket library for Go, designed to make working with WebSockets **simple, i
 
 ## ✨ Features
 
-- ✅ Minimal setup
+- ✅ **Minimal code**: focus on your app, not protocol details
 - ✅ Automatic handling of ping/pong and close frames.
-- ✅ Connection management built-in — no need to write your own manager.
-- ✅ Safe for concurrent use — internally protected.
+- ✅ Connection management built-in.
+- ✅ Safe for concurrent use.
 - ✅ Support for middlewares and connect/disconnect hooks.
-- ✅ Easy to use API with support of Context.
+- ✅ Context support for cancellation
 
 ---
 
@@ -54,7 +56,7 @@ func main() {
 	manager = snapws.NewManager[string](nil)
 	defer manager.Shutdown()
 
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/echo", handler)
 
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
