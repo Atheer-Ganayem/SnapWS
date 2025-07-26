@@ -33,6 +33,8 @@ const (
 	OpcodePong         = 0xA // Pong
 )
 
+const MaxHeaderSize = 14
+
 type Frame struct {
 	FIN           bool
 	OPCODE        uint8

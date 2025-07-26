@@ -44,8 +44,8 @@ func (w *ConnWriter[KeyType]) reset(ctx context.Context, opcode uint8) {
 		ctx = context.TODO()
 	}
 
-	w.start = 14
-	w.used = 14
+	w.start = MaxHeaderSize
+	w.used = MaxHeaderSize
 	w.opcode = opcode
 	w.closed = false
 	w.flushCount = 0
@@ -161,8 +161,8 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		}
 		if err == nil {
 			w.flushCount++
-			w.used = 14
-			w.start = 14
+			w.used = MaxHeaderSize
+			w.start = MaxHeaderSize
 		}
 		return err
 	}

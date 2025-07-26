@@ -30,7 +30,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	conn, err := manager.Connect(name, w, r)
 	if err != nil {
-		handleHandshakeErr(w, err)
 		return
 	}
 	defer conn.Close()
@@ -71,14 +70,4 @@ func onConnect(id string, conn *snapws.Conn[string]) {
 }
 func onDisconnect(id string, conn *snapws.Conn[string]) {
 	conn.Manager.BroadcastString(context.TODO(), id, []byte(id+" disconnected"))
-}
-
-func handleHandshakeErr(w http.ResponseWriter, err error) {
-	if hErr, ok := snapws.AsHttpErr(err); ok {
-		w.WriteHeader(hErr.Code)
-		w.Write([]byte(hErr.Message))
-	} else {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-	}
 }

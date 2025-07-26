@@ -36,8 +36,6 @@ func main() {
 func donwloadHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := manager.Connect(r.RemoteAddr, w, r)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
 		return
 	}
 	defer conn.Close()

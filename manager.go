@@ -18,20 +18,27 @@ type Manager[KeyType comparable] struct {
 
 // Creates a new manager. KeyType is the type of the key of the conns map.
 // KeyType must be comparable.
-func NewManager[KeyType comparable](args *Options[KeyType]) *Manager[KeyType] {
-	if args == nil {
-		args = &Options[KeyType]{}
+func NewManager[KeyType comparable](opts *Options[KeyType]) *Manager[KeyType] {
+	if opts == nil {
+		opts = &Options[KeyType]{}
 	}
-	args.WithDefault()
+	opts.WithDefault()
 
 	m := &Manager[KeyType]{
 		Conns:   make(map[KeyType]*Conn[KeyType]),
-		Options: *args,
+		Options: *opts,
 	}
 
 	return m
 }
 
+// Connect does 3 things:
+//   - websocket handshake & runs the middlewares defined in manager options.
+//   - connect the user to the manager & runs the onConnect hook.
+//   - runs the connection loops (listeners, pingers, etc...)
+//
+// Any error retuened by this method is a handhshake error, and the response is handled by the handshake.
+// You shouln't write to the writer after this fucntion is called even if it return a non-nil error.
 func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*Conn[KeyType], error) {
 	c, subProtocol, err := m.handShake(w, r)
 	if err != nil {
@@ -52,6 +59,10 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 	return conn, nil
 }
 
+// Adds a conn[KeyType] to the manager (Manager[KeyType]).
+// Receives a key and a pointer to a conn.
+// If the key already exists, it will close the connection associated with the key,
+// and replace it with the new connection received by the fucntion.
 func (m *Manager[KeyType]) Register(key KeyType, conn *Conn[KeyType]) {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
@@ -82,10 +93,14 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 	return nil
 }
 
+// Appends the receive middleware to the middlewares slice of the manager.
 func (m *Manager[KeyType]) Use(mw Middlware) {
 	m.Middlwares = append(m.Middlwares, mw)
 }
 
+// Receives a key, returns a pointer to the connection associated with the key and a bool.
+// If the connection exists, it will return a pointer to it and a true value.
+// If the connection deosn't exists, it will return nil and a false value.
 func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
@@ -95,6 +110,7 @@ func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 	return conn, ok
 }
 
+// Get all connections associated with the manager as a slice of pointers.
 func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
@@ -106,6 +122,7 @@ func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 	return conns
 }
 
+// Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
 func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyType] {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
