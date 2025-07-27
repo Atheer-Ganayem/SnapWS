@@ -178,10 +178,7 @@ func (w *ConnWriter[KeyType]) Close() error {
 
 func trySendErr(errCh chan error, err error) {
 	if errCh != nil {
-		select {
-		case errCh <- err:
-		default:
-		}
+		errCh <- err
 	}
 }
 
