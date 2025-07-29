@@ -50,7 +50,7 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 					http.Error(w, mwErr.Message, mwErr.Code)
 				}
 				http.Error(w, "middleware error", http.StatusBadRequest)
-				return nil, "", err
+				return nil, subProtocol, err
 			}
 		}
 	}
@@ -63,7 +63,7 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 	c, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		http.Error(w, "failed to hijack connection", http.StatusInternalServerError)
-		return nil, "", err
+		return nil, subProtocol, err
 	}
 
 	// writing response

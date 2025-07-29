@@ -144,6 +144,9 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyTy
 // you can set it as a zero value of you KeyType), opcode (text or binary), data as a slice of bytes.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode int, data []byte) (int, error) {
+	if data == nil {
+		return 0, ErrEmptyPayload
+	}
 	if ctx == nil {
 		ctx = context.TODO()
 	}

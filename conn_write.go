@@ -212,7 +212,7 @@ func (conn *Conn[KeyType]) sendFrame(buf []byte) error {
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
-	if len(b) == 0 {
+	if b == nil || len(b) == 0 {
 		return ErrEmptyPayload
 	}
 
