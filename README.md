@@ -50,27 +50,26 @@ import (
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
-var manager *snapws.Manager[string]
+var upgrader *snapws.Upgrader
 
 func main() {
-	manager = snapws.NewManager[string](nil)
-	defer manager.Shutdown()
+	upgrader = snapws.NewUpgrader(nil)
 
-	http.HandleFunc("/echo", handler)
+	http.HandleFunc("/", handler)
 
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	conn, err := manager.Connect(r.RemoteAddr, w, r)
+	conn, err := upgrader.Upgrade(w, r)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
 	for {
-		msg, err := conn.ReadString(context.TODO())
+		data, err := conn.ReadString(context.TODO())
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -78,8 +77,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendString(context.TODO(), msg)
-
+		err = conn.SendString(context.TODO(), data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
