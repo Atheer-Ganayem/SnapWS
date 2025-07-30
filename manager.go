@@ -8,15 +8,25 @@ import (
 	"unicode/utf8"
 )
 
+// Manager tracks active WebSocket connections in a thread-safe way.
+//
+// Key points:
+//   - Generic over KeyType (e.g., user ID), which must be comparable.
+//   - Each connection is stored as *ManagedConn[KeyType] in the Conns map.
+//   - Manager provides safe fetch/add/remove of connections without requiring
+//     additional synchronization in user code.
+//   - Thread-safety is enforced with sync.RWMutex (expect some performance overhead).
+//
+// The Upgrader field handles the WebSocket upgrade, and the optional
+// OnRegister / OnUnregister callbacks are invoked when connections are added or removed.
 type Manager[KeyType comparable] struct {
-	// Conns map keeps track of all active connections.
-	// Each connection must be keyed by a unique identifier, preferably the user id.
+	// Conns stores active connections keyed by a unique identifier.
 	Conns    map[KeyType]*ManagedConn[KeyType]
 	Mu       sync.RWMutex
 	Upgrader *Upgrader
 
-	OnRigester   func(id KeyType, conn *ManagedConn[KeyType])
-	OnUnrigester func(id KeyType, conn *ManagedConn[KeyType])
+	OnRegister   func(id KeyType, conn *ManagedConn[KeyType])
+	OnUnregister func(id KeyType, conn *ManagedConn[KeyType])
 }
 
 // Creates a new manager. KeyType is the type of the key of the conns map.
@@ -66,8 +76,8 @@ func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
 	m.Conns[key] = conn
 	m.Mu.Unlock()
 
-	if m.OnRigester != nil {
-		m.OnRigester(key, conn)
+	if m.OnRegister != nil {
+		m.OnRegister(key, conn)
 	}
 }
 
@@ -84,8 +94,8 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 	delete(m.Conns, id)
 	m.Mu.Unlock()
 
-	if m.OnUnrigester != nil {
-		m.OnUnrigester(id, conn)
+	if m.OnUnregister != nil {
+		m.OnUnregister(id, conn)
 	}
 
 	return nil

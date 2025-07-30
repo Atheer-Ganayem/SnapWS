@@ -8,8 +8,12 @@ import (
 	"time"
 )
 
-// ConnReader provides an io.Reader interface over a websocket message (frame group).
-// It supports reading fragmented frames as a single continuous stream.
+// ConnReader provides an io.Reader for a single WebSocket message.
+//
+// Concurrency:
+//   - Only one goroutine may read from a Conn (and thus its ConnReader)
+//     at a time. Concurrent reads on the same connection or the same
+//     ConnReader are not supported.
 type ConnReader struct {
 	conn    *Conn
 	message *message // Group of frames making up the complete message

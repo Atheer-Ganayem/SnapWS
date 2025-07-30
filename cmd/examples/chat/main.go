@@ -17,8 +17,8 @@ func main() {
 	})
 	manager = snapws.NewManager[string](upgrader)
 	defer manager.Shutdown()
-	manager.OnRigester = onRigester
-	manager.OnUnrigester = onUnrigester
+	manager.OnRegister = onRigester
+	manager.OnUnregister = onUnrigester
 
 	http.HandleFunc("/", handler)
 

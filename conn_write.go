@@ -7,6 +7,9 @@ import (
 	"unicode/utf8"
 )
 
+// ConnWriter is NOT safe for concurrent use.
+// Only one goroutine may call Write/Flush/Close at a time.
+// Use Conn.NextWriter to safely obtain exclusive access to a writer.
 type ConnWriter struct {
 	conn *Conn
 	buf  []byte
@@ -301,7 +304,7 @@ func (conn *Conn) Ping() error {
 	select {
 	case <-conn.done:
 		return fatal(ErrConnClosed)
-	case conn.outboundControl <- &SendFrameRequest{
+	case conn.outboundControl <- &sendFrameRequest{
 		frame: &frame,
 		errCh: errCh,
 		ctx:   nil,
@@ -333,7 +336,7 @@ func (conn *Conn) Pong(payload []byte) {
 	select {
 	case <-conn.done:
 		return
-	case conn.outboundControl <- &SendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
+	case conn.outboundControl <- &sendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
 	default:
 		conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
 		return

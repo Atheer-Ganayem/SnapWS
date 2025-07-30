@@ -11,6 +11,12 @@ import (
 	"unicode/utf8"
 )
 
+// Conn represents a single WebSocket connection.
+// It owns the underlying network connection and manages
+// reading/writing frames, assembling messages, handling control
+// frames (ping/pong/close), and lifecycle state.
+//
+// Reader and Writer aren't safe to use from multiple Go routines.
 type Conn struct {
 	raw         net.Conn
 	upgrader    *Upgrader
@@ -30,7 +36,7 @@ type Conn struct {
 	ticker *time.Ticker
 
 	// used for sending control frames.
-	outboundControl chan *SendFrameRequest
+	outboundControl chan *sendFrameRequest
 
 	reader ConnReader
 	writer *ConnWriter
@@ -38,13 +44,16 @@ type Conn struct {
 	readFrameBuf []byte
 }
 
+// ManagedConn is a Conn that is tracked by a Manager.
+// It links a connection to a unique key so that the Manager
+// can manage it safely (fetch/add/remove).
 type ManagedConn[KeyType comparable] struct {
 	*Conn
 	Key     KeyType
 	Manager *Manager[KeyType]
 }
 
-type SendFrameRequest struct {
+type sendFrameRequest struct {
 	frame *frame
 	errCh chan error
 	ctx   context.Context
@@ -61,7 +70,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string) *Conn {
 		inboundFrames:   make(chan *frame, u.InboundFramesSize),
 		inboundMessages: make(chan *message, u.InboundMessagesSize),
 
-		outboundControl: make(chan *SendFrameRequest, u.OutboundControlSize),
+		outboundControl: make(chan *sendFrameRequest, u.OutboundControlSize),
 
 		readFrameBuf: make([]byte, u.ReadBufferSize),
 	}
@@ -212,7 +221,7 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		errCh := make(chan error)
 		if err == nil && !conn.isClosed.Load() {
 			select {
-			case conn.outboundControl <- &SendFrameRequest{
+			case conn.outboundControl <- &sendFrameRequest{
 				frame: &frame,
 				errCh: errCh,
 			}:
