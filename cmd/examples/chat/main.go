@@ -12,13 +12,13 @@ import (
 var manager *snapws.Manager[string]
 
 func main() {
-	manager = snapws.NewManager(&snapws.Options[string]{
-		Middlwares:   []snapws.Middlware{rejectDuplicateNames},
-		OnConnect:    onConnect,
-		OnDisconnect: onDisconnect,
+	upgrader := snapws.NewUpgrader(&snapws.Options{
+		Middlwares: []snapws.Middlware{rejectDuplicateNames},
 	})
-
+	manager = snapws.NewManager[string](upgrader)
 	defer manager.Shutdown()
+	manager.OnRigester = onRigester
+	manager.OnUnrigester = onUnrigester
 
 	http.HandleFunc("/", handler)
 
@@ -65,9 +65,9 @@ func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func onConnect(id string, conn *snapws.Conn[string]) {
+func onRigester(id string, conn *snapws.ManagedConn[string]) {
 	manager.BroadcastString(context.TODO(), id, []byte(id+" connected"))
 }
-func onDisconnect(id string, conn *snapws.Conn[string]) {
+func onUnrigester(id string, conn *snapws.ManagedConn[string]) {
 	conn.Manager.BroadcastString(context.TODO(), id, []byte(id+" disconnected"))
 }

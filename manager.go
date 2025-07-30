@@ -11,50 +11,45 @@ import (
 type Manager[KeyType comparable] struct {
 	// Conns map keeps track of all active connections.
 	// Each connection must be keyed by a unique identifier, preferably the user id.
-	Conns map[KeyType]*Conn[KeyType]
-	Mu    sync.RWMutex
-	Options[KeyType]
+	Conns    map[KeyType]*ManagedConn[KeyType]
+	Mu       sync.RWMutex
+	Upgrader *Upgrader
+
+	OnRigester   func(id KeyType, conn *ManagedConn[KeyType])
+	OnUnrigester func(id KeyType, conn *ManagedConn[KeyType])
 }
 
 // Creates a new manager. KeyType is the type of the key of the conns map.
 // KeyType must be comparable.
-func NewManager[KeyType comparable](opts *Options[KeyType]) *Manager[KeyType] {
-	if opts == nil {
-		opts = &Options[KeyType]{}
+func NewManager[KeyType comparable](u *Upgrader) *Manager[KeyType] {
+	if u == nil {
+		u = NewUpgrader(nil)
 	}
-	opts.WithDefault()
 
 	m := &Manager[KeyType]{
-		Conns:   make(map[KeyType]*Conn[KeyType]),
-		Options: *opts,
+		Conns:    make(map[KeyType]*ManagedConn[KeyType]),
+		Upgrader: u,
 	}
 
 	return m
 }
 
 // Connect does 3 things:
-//   - websocket handshake & runs the middlewares defined in manager options.
-//   - connect the user to the manager & runs the onConnect hook.
+//   - websocket handshake & runs the middlewares defined in upgrader options.
+//   - connect the user to the manager & runs the onConnect & onRegister hooks.
 //   - runs the connection loops (listeners, pingers, etc...)
 //
 // Any error retuened by this method is a handhshake error, and the response is handled by the handshake.
 // You shouln't write to the writer after this fucntion is called even if it return a non-nil error.
-func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*Conn[KeyType], error) {
-	c, subProtocol, err := m.handShake(w, r)
+func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*ManagedConn[KeyType], error) {
+	c, err := m.Upgrader.Upgrade(w, r)
 	if err != nil {
 		return nil, err
 	}
 
-	conn := m.newConn(c, key, subProtocol)
-	m.Register(key, conn)
-	if m.OnConnect != nil {
-		m.OnConnect(key, conn)
-	}
+	conn := &ManagedConn[KeyType]{Conn: c, Key: key, Manager: m}
 
-	go conn.readLoop()
-	go conn.acceptMessage()
-	go conn.listen()
-	go conn.pingLoop()
+	m.Register(key, conn)
 
 	return conn, nil
 }
@@ -63,14 +58,17 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 // Receives a key and a pointer to a conn.
 // If the key already exists, it will close the connection associated with the key,
 // and replace it with the new connection received by the fucntion.
-func (m *Manager[KeyType]) Register(key KeyType, conn *Conn[KeyType]) {
+func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
 	m.Mu.Lock()
-	defer m.Mu.Unlock()
-
 	if conn, ok := m.Conns[key]; ok {
 		conn.raw.Close()
 	}
 	m.Conns[key] = conn
+	m.Mu.Unlock()
+
+	if m.OnRigester != nil {
+		m.OnRigester(key, conn)
+	}
 }
 
 // only to be called bt conn.Close(), dont use it manually.
@@ -86,22 +84,17 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 	delete(m.Conns, id)
 	m.Mu.Unlock()
 
-	if m.OnDisconnect != nil {
-		m.OnDisconnect(id, conn)
+	if m.OnUnrigester != nil {
+		m.OnUnrigester(id, conn)
 	}
 
 	return nil
 }
 
-// Appends the receive middleware to the middlewares slice of the manager.
-func (m *Manager[KeyType]) Use(mw Middlware) {
-	m.Middlwares = append(m.Middlwares, mw)
-}
-
 // Receives a key, returns a pointer to the connection associated with the key and a bool.
 // If the connection exists, it will return a pointer to it and a true value.
 // If the connection deosn't exists, it will return nil and a false value.
-func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
+func (m *Manager[KeyType]) GetConn(key KeyType) (*ManagedConn[KeyType], bool) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
 
@@ -111,11 +104,11 @@ func (m *Manager[KeyType]) GetConn(key KeyType) (*Conn[KeyType], bool) {
 }
 
 // Get all connections associated with the manager as a slice of pointers.
-func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
+func (m *Manager[KeyType]) GetAllConns() []*ManagedConn[KeyType] {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
 
-	conns := make([]*Conn[KeyType], 0, len(m.Conns))
+	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
 	for _, v := range m.Conns {
 		conns = append(conns, v)
 	}
@@ -123,11 +116,11 @@ func (m *Manager[KeyType]) GetAllConns() []*Conn[KeyType] {
 }
 
 // Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
-func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*Conn[KeyType] {
+func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedConn[KeyType] {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
 
-	conns := make([]*Conn[KeyType], 0, len(m.Conns))
+	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
 	var n int
 	for k, v := range m.Conns {
 		if k != exclude {
@@ -165,15 +158,15 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 	}
 
 	var workers int
-	if m.BroadcastWorkers != nil {
-		workers = m.BroadcastWorkers(connsLength)
+	if m.Upgrader.BroadcastWorkers != nil {
+		workers = m.Upgrader.BroadcastWorkers(connsLength)
 	}
 	if workers <= 0 {
 		workers = (connsLength / 10) + 2
 	}
 
 	var wg sync.WaitGroup
-	ch := make(chan *Conn[KeyType], workers)
+	ch := make(chan *ManagedConn[KeyType], workers)
 	done := make(chan struct{})
 	var n int64
 
@@ -249,7 +242,7 @@ func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, 
 func (m *Manager[KeyType]) Shutdown() {
 	workers := (len(m.Conns) / 10) + 2
 	var wg sync.WaitGroup
-	ch := make(chan *Conn[KeyType], workers)
+	ch := make(chan *ManagedConn[KeyType], workers)
 
 	for range workers {
 		wg.Add(1)
@@ -269,7 +262,7 @@ func (m *Manager[KeyType]) Shutdown() {
 	wg.Wait()
 
 	m.Mu.Lock()
-	m.Conns = make(map[KeyType]*Conn[KeyType])
+	m.Conns = make(map[KeyType]*ManagedConn[KeyType])
 	m.Mu.Unlock()
 
 }

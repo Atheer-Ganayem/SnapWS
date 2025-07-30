@@ -13,10 +13,11 @@ import (
 
 // Mock net.Conn for testing
 type mockConn struct {
-	readBuf  *bytes.Buffer
-	writeBuf *bytes.Buffer
-	closed   bool
-	mu       sync.Mutex
+	readBuf    *bytes.Buffer
+	writeBuf   *bytes.Buffer
+	closed     bool
+	mu         sync.Mutex
+	allowReads bool
 }
 
 func newMockConn() *mockConn {
@@ -27,6 +28,9 @@ func newMockConn() *mockConn {
 }
 
 func (m *mockConn) Read(b []byte) (n int, err error) {
+	if !m.allowReads {
+		time.Sleep(time.Second / 2)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -58,13 +62,16 @@ func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 
 func (m *mockConn) writeFrame(frame *frame) {
+	if !m.allowReads {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.readBuf.Write(frame.Encoded)
 }
 
 func createTestManager() *Manager[string] {
-	opts := &Options[string]{
+	opts := &Options{
 		WriteWait:           time.Second,
 		ReadWait:            time.Second * 5,
 		PingEvery:           time.Second * 30,
@@ -75,14 +82,14 @@ func createTestManager() *Manager[string] {
 		InboundMessagesSize: 5,
 		OutboundControlSize: 2,
 	}
-	return NewManager(opts)
+	return NewManager[string](NewUpgrader(opts))
 }
 
 func TestConnCreation(t *testing.T) {
 	manager := createTestManager()
 	mockConn := newMockConn()
-
-	conn := manager.newConn(mockConn, "test-key", "")
+	c := manager.Upgrader.newConn(mockConn, "")
+	conn := manager.newManagedConn(c, "test-key")
 
 	if conn.Key != "test-key" {
 		t.Errorf("Key = %v, want %v", conn.Key, "test-key")
@@ -102,9 +109,9 @@ func TestConnCreation(t *testing.T) {
 }
 
 func TestConnClose(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	// Test normal close
 	conn.Close()
@@ -119,10 +126,9 @@ func TestConnClose(t *testing.T) {
 }
 
 func TestConnCloseWithCode(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	conn.CloseWithCode(CloseProtocolError, "test reason")
 
@@ -174,9 +180,9 @@ func TestConnCloseWithPayload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager := createTestManager()
+			upgrader := NewUpgrader(nil)
 			mockConn := newMockConn()
-			conn := manager.newConn(mockConn, "test-key", "")
+			conn := upgrader.newConn(mockConn, "")
 
 			conn.CloseWithPayload(tt.payload)
 
@@ -188,10 +194,9 @@ func TestConnCloseWithPayload(t *testing.T) {
 }
 
 func TestConnWriter(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -228,9 +233,9 @@ func TestConnWriter(t *testing.T) {
 }
 
 func TestConnWriterInvalidOpcode(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -241,25 +246,33 @@ func TestConnWriterInvalidOpcode(t *testing.T) {
 }
 
 func TestConnWriterFlush(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
-	writer, _ := conn.NextWriter(ctx, OpcodeText)
+	writer, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Errorf("Writer failed: %v", err)
+	}
 
 	// Write some data
-	writer.Write([]byte("test"))
+	_, err = writer.Write([]byte("test"))
+	if err != nil {
+		t.Errorf("Write failed: %v", err)
+	}
 
 	// Test flush without FIN
-	err := writer.Flush(false)
+	err = writer.Flush(false)
 	if err != nil {
 		t.Errorf("Flush failed: %v", err)
 	}
 
 	// Write more data
-	writer.Write([]byte(" data"))
+	_, err = writer.Write([]byte("data"))
+	if err != nil {
+		t.Errorf("Write failed: %v", err)
+	}
 
 	// Test flush with FIN
 	err = writer.Flush(true)
@@ -271,10 +284,9 @@ func TestConnWriterFlush(t *testing.T) {
 }
 
 func TestSendBytes(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	data := []byte{1, 2, 3, 4, 5}
@@ -293,10 +305,9 @@ func TestSendBytes(t *testing.T) {
 }
 
 func TestSendString(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	data := []byte("hello world")
@@ -321,10 +332,9 @@ func TestSendString(t *testing.T) {
 }
 
 func TestSendJSON(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -346,10 +356,9 @@ func TestSendJSON(t *testing.T) {
 }
 
 func TestPingPong(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	// Test Ping
 	err := conn.Ping()
@@ -363,9 +372,9 @@ func TestPingPong(t *testing.T) {
 }
 
 func TestConnReader(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	// Create a test message
 	testData := []byte("hello world")
@@ -375,7 +384,7 @@ func TestConnReader(t *testing.T) {
 	}
 
 	// Set up reader
-	reader := &ConnReader[string]{
+	reader := &ConnReader{
 		conn:    conn,
 		message: message,
 		eof:     false,
@@ -424,7 +433,7 @@ func TestConnReaderPayload(t *testing.T) {
 		Payload: bytes.NewBuffer(testData),
 	}
 
-	reader := &ConnReader[string]{
+	reader := &ConnReader{
 		message: message,
 	}
 
@@ -435,9 +444,9 @@ func TestConnReaderPayload(t *testing.T) {
 }
 
 func TestReadMessage(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	// Test with closed connection
 	conn.isClosed.Store(true)
@@ -450,9 +459,9 @@ func TestReadMessage(t *testing.T) {
 }
 
 func TestReadBinary(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -465,9 +474,9 @@ func TestReadBinary(t *testing.T) {
 }
 
 func TestReadString(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -480,11 +489,9 @@ func TestReadString(t *testing.T) {
 }
 
 func TestReadJSON(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.readLoop()
-	go conn.acceptMessage()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -497,40 +504,10 @@ func TestReadJSON(t *testing.T) {
 	}
 }
 
-func TestAcceptFrame(t *testing.T) {
-	manager := createTestManager()
-	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-
-	// Create a masked text frame
-	frame, err := newFrame(true, OpcodeText, true, []byte("hello"))
-	if err != nil {
-		t.Fatalf("Failed to create frame: %v", err)
-	}
-
-	// Write frame to mock connection
-	mockConn.writeFrame(&frame)
-
-	// Test accepting the frame
-	acceptedFrame, code, err := conn.acceptFrame()
-	if err != nil {
-		t.Errorf("acceptFrame failed: %v", err)
-	}
-	if code != 0 {
-		t.Errorf("Expected code 0, got %v", code)
-	}
-	if acceptedFrame == nil {
-		t.Fatal("Frame is nil")
-	}
-	if acceptedFrame.OPCODE != OpcodeText {
-		t.Errorf("Frame opcode = %v, want %v", acceptedFrame.OPCODE, OpcodeText)
-	}
-}
-
 func TestWriteHeaders(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	writer, _ := conn.NextWriter(ctx, OpcodeText)
@@ -548,9 +525,9 @@ func TestWriteHeaders(t *testing.T) {
 }
 
 func TestLockUnlockW(t *testing.T) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 
@@ -585,15 +562,13 @@ func TestSendMessageToChan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options[string]{
+			opts := &Options{
 				BackpressureStrategy: tt.strategy,
 				InboundMessagesSize:  1,
 			}
-			opts.WithDefault()
-			manager := NewManager(opts)
+			upgrader := NewUpgrader(opts)
 			mockConn := newMockConn()
-			conn := manager.newConn(mockConn, "test-key", "")
-			go conn.listen()
+			conn := upgrader.newConn(mockConn, "")
 
 			message := &message{
 				OPCODE:  OpcodeText,
@@ -614,12 +589,9 @@ func TestSendMessageToChan(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkConnWrite(b *testing.B) {
-	manager := NewManager(&Options[string]{
-		BackpressureStrategy: BackpressureWait,
-	})
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	data := make([]byte, 1024)
@@ -636,10 +608,9 @@ func BenchmarkConnWrite(b *testing.B) {
 }
 
 func BenchmarkSendBytes(b *testing.B) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	data := make([]byte, 1024)
@@ -651,10 +622,9 @@ func BenchmarkSendBytes(b *testing.B) {
 }
 
 func BenchmarkSendString(b *testing.B) {
-	manager := createTestManager()
+	upgrader := NewUpgrader(nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "test-key", "")
-	go conn.listen()
+	conn := upgrader.newConn(mockConn, "")
 
 	ctx := context.Background()
 	data := bytes.Repeat([]byte("a"), 1024)

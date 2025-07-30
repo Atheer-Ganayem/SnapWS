@@ -265,7 +265,7 @@ func readLength(b []byte) (int, error) {
 
 // Write the frame header to a ConnWriter, must have at least 14 empty bytes at the begining.
 // Note: it doesnt supporting writing masking key, will support later.
-func (w *ConnWriter[KeyType]) writeHeaders(FIN bool, OPCODE uint8) error {
+func (w *ConnWriter) writeHeaders(FIN bool, OPCODE uint8) error {
 	if w.start < 14 {
 		return ErrInsufficientHeaderSpace
 	}

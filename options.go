@@ -28,13 +28,13 @@ const (
 	DefaultOutboundControl = 4
 )
 
-type Options[KeyType comparable] struct {
+type Options struct {
 	// Ran before finalizing and accepting the handshake.
 	Middlwares []Middlware
 	// Ran when the connection finalizes.
-	OnConnect func(id KeyType, conn *Conn[KeyType])
-	// Ran when connection closes.
-	OnDisconnect func(id KeyType, conn *Conn[KeyType])
+	OnConnect func(conn *Conn)
+	// // Ran when connection closes.
+	OnDisconnect func(conn *Conn)
 
 	// If not set it will default to 5 seconds.
 	WriteWait time.Duration
@@ -92,7 +92,7 @@ type Options[KeyType comparable] struct {
 	BackpressureStrategy BackpressureStrategy
 }
 
-func (opt *Options[KeyType]) WithDefault() {
+func (opt *Options) WithDefault() {
 	if opt.WriteWait == 0 {
 		opt.WriteWait = defaultWriteWait
 	}

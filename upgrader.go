@@ -3,7 +3,6 @@ package snapws
 import (
 	"crypto/sha1"
 	"encoding/base64"
-	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,46 +10,69 @@ import (
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (net.Conn, string, error) {
+// Used to upgrader HTTP connections to Websocket connections.
+// Hold snap.Options. If you wanna learn more about the options go see their docs.
+type Upgrader struct {
+	*Options
+}
+
+// Created a new upgrader with the given options.
+// If options is nil, then it will assign a new options with default values.
+func NewUpgrader(opts *Options) *Upgrader {
+	if opts == nil {
+		opts = &Options{}
+	}
+	opts.WithDefault()
+
+	return &Upgrader{
+		Options: opts,
+	}
+}
+
+// Upgrades an HTTP connection to a Websocket connection.
+// Receives (w http.ResponseWriter, r *http.Request) and returns a pointer to a snapws.Conn and an err.
+// It checks method, headers, and selects an appopiate sub-protocol and runs the middlewares and the
+// onConnect hook if they exist, and finnaly it responds to the client (both if the upgrade succeeds or fails).
+func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	// validate method and headers
 	if r.Method != http.MethodGet {
 		http.Error(w, "request method should be get", http.StatusMethodNotAllowed)
-		return nil, "", ErrWrongMethod
+		return nil, ErrWrongMethod
 	}
 
 	if err := validateUpgradeHeader(r); err != nil {
 		http.Error(w, "invalid or missing upgrade header", http.StatusUpgradeRequired)
-		return nil, "", err
+		return nil, err
 	}
 	if err := validateConnectionHeader(r); err != nil {
 		http.Error(w, "invalid or missing connection header", http.StatusBadRequest)
-		return nil, "", err
+		return nil, err
 	}
 	if err := validateVersionHeader(r); err != nil {
 		http.Error(w, "invalid or missing Sec-WebSocket-Version header, must be 13", http.StatusBadRequest)
-		return nil, "", err
+		return nil, err
 	}
 	if err := validatedSecKeyHeader(r); err != nil {
 		http.Error(w, "invalid or missing Sec-WebSocket-Key header", http.StatusBadRequest)
-		return nil, "", err
+		return nil, err
 	}
 
 	// selecting a subprotocol
-	subProtocol := selectSubProtocol(r, m.SubProtocols)
-	if subProtocol == "" && m.RejectRaw {
+	subProtocol := selectSubProtocol(r, u.SubProtocols)
+	if subProtocol == "" && u.RejectRaw {
 		http.Error(w, "unsupported or missing subprotocol", http.StatusBadRequest)
-		return nil, "", ErrNotSupportedSubProtocols
+		return nil, ErrNotSupportedSubProtocols
 	}
 
 	// running middlewares
-	if m.Middlwares != nil {
-		for _, middleware := range m.Middlwares {
+	if u.Middlwares != nil {
+		for _, middleware := range u.Middlwares {
 			if err := middleware(w, r); err != nil {
 				if mwErr, ok := AsMiddlewareErr(err); ok {
 					http.Error(w, mwErr.Message, mwErr.Code)
 				}
 				http.Error(w, "middleware error", http.StatusBadRequest)
-				return nil, subProtocol, err
+				return nil, err
 			}
 		}
 	}
@@ -63,7 +85,7 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 	c, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		http.Error(w, "failed to hijack connection", http.StatusInternalServerError)
-		return nil, subProtocol, err
+		return nil, err
 	}
 
 	// writing response
@@ -82,8 +104,16 @@ func (m *Manager[KeyType]) handShake(w http.ResponseWriter, r *http.Request) (ne
 	p = append(p, "\r\n"...)
 
 	_, err = c.Write(p)
+	if err != nil {
+		return nil, err
+	}
 
-	return c, subProtocol, err
+	conn := u.newConn(c, subProtocol)
+	if u.OnConnect != nil {
+		u.OnConnect(conn)
+	}
+
+	return conn, err
 }
 
 func validateConnectionHeader(r *http.Request) error {
@@ -165,4 +195,9 @@ func selectSubProtocol(r *http.Request, subProtocols []string) string {
 	}
 
 	return ""
+}
+
+// Appends the receive middleware to the middlewares slice of the upgrader.
+func (u *Upgrader) Use(mw Middlware) {
+	u.Middlwares = append(u.Middlwares, mw)
 }

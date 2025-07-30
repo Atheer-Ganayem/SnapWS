@@ -16,15 +16,14 @@ type FileInfo struct {
 	Size int64  `json:"size"`
 }
 
-var manager *snapws.Manager[string]
+var upgrader *snapws.Upgrader
 
 func main() {
-	manager = snapws.NewManager(&snapws.Options[string]{
+	upgrader = snapws.NewUpgrader(&snapws.Options{
 		PingEvery:      time.Second * 25,
 		ReadWait:       time.Second * 30,
 		MaxMessageSize: snapws.DefaultReadBufferSize * 2,
 	})
-	defer manager.Shutdown()
 
 	http.HandleFunc("/download", donwloadHandler)
 	http.HandleFunc("/upload", uploadHandler)
@@ -34,7 +33,7 @@ func main() {
 }
 
 func donwloadHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := manager.Connect(r.RemoteAddr, w, r)
+	conn, err := upgrader.Upgrade(w, r)
 	if err != nil {
 		return
 	}
@@ -68,7 +67,7 @@ func donwloadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := manager.Connect(r.RemoteAddr, w, r)
+	conn, err := upgrader.Upgrade(w, r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -93,7 +92,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	written := 0
-	buf := make([]byte, manager.ReadBufferSize)
+	buf := make([]byte, upgrader.ReadBufferSize)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {

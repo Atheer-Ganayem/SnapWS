@@ -7,8 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-type ConnWriter[KeyType comparable] struct {
-	conn *Conn[KeyType]
+type ConnWriter struct {
+	conn *Conn
 	buf  []byte
 	// The start of the frame in the buf. its used to save space for the frame header.
 	start int
@@ -26,10 +26,10 @@ type ConnWriter[KeyType comparable] struct {
 
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
-func (conn *Conn[KeyType]) newWriter(opcode uint8) *ConnWriter[KeyType] {
-	return &ConnWriter[KeyType]{
+func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
+	return &ConnWriter{
 		conn:   conn,
-		buf:    make([]byte, conn.Manager.WriteBufferSize),
+		buf:    make([]byte, conn.upgrader.WriteBufferSize),
 		opcode: opcode,
 		lock:   make(chan struct{}, 1),
 		sig:    make(chan struct{}),
@@ -39,7 +39,7 @@ func (conn *Conn[KeyType]) newWriter(opcode uint8) *ConnWriter[KeyType] {
 }
 
 // resets the writer to prepare it for the next write.
-func (w *ConnWriter[KeyType]) reset(ctx context.Context, opcode uint8) {
+func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -57,7 +57,7 @@ func (w *ConnWriter[KeyType]) reset(ctx context.Context, opcode uint8) {
 // The context given, is to be used for all the writer's functions as long is its not closed,
 // This mean its used when its writing and flushing. After you close the writer and call NextWriter
 // again, you must give it a new context.
-func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter[KeyType], error) {
+func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, error) {
 	if conn.isClosed.Load() {
 		return nil, fatal(ErrConnClosed)
 	}
@@ -83,7 +83,7 @@ func (conn *Conn[KeyType]) NextWriter(ctx context.Context, msgType uint8) (*Conn
 
 // Write appends bytes to the writer buffer and flushes if full.
 // Automatically handles splitting into multiple frames.
-func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
+func (w *ConnWriter) Write(p []byte) (n int, err error) {
 	if w == nil {
 		return 0, ErrWriterUnintialized
 	}
@@ -120,7 +120,7 @@ func (w *ConnWriter[KeyType]) Write(p []byte) (n int, err error) {
 //     No point in retrying.
 //   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
 //     positions have been reset.
-func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
+func (w *ConnWriter) Flush(FIN bool) error {
 	if w.conn.isClosed.Load() {
 		return fatal(ErrChannelClosed)
 	}
@@ -140,7 +140,6 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 	if err != nil {
 		return err
 	}
-
 	select {
 	case <-w.conn.done:
 		return fatal(ErrChannelClosed)
@@ -148,7 +147,6 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 		return w.ctx.Err()
 	case w.sig <- struct{}{}:
 	}
-
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
@@ -169,7 +167,7 @@ func (w *ConnWriter[KeyType]) Flush(FIN bool) error {
 }
 
 // Close flushes the final frame and releases the writer lock.
-func (w *ConnWriter[KeyType]) Close() error {
+func (w *ConnWriter) Close() error {
 	defer w.conn.unlockW()
 	defer func() { w.closed = true }()
 	err := w.Flush(true)
@@ -184,8 +182,8 @@ func trySendErr(errCh chan error, err error) {
 
 // sendFrame writes a prepared frame to the underlying connection.
 // Used internally to send frames from the outbound queues.
-func (conn *Conn[KeyType]) sendFrame(buf []byte) error {
-	err := conn.raw.SetWriteDeadline(time.Now().Add(conn.Manager.WriteWait))
+func (conn *Conn) sendFrame(buf []byte) error {
+	err := conn.raw.SetWriteDeadline(time.Now().Add(conn.upgrader.WriteWait))
 	if err != nil {
 		return fatal(err)
 	}
@@ -211,8 +209,8 @@ func (conn *Conn[KeyType]) sendFrame(buf []byte) error {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
-	if b == nil || len(b) == 0 {
+func (conn *Conn) SendBytes(ctx context.Context, b []byte) error {
+	if len(b) == 0 {
 		return ErrEmptyPayload
 	}
 
@@ -238,7 +236,7 @@ func (conn *Conn[KeyType]) SendBytes(ctx context.Context, b []byte) error {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) SendString(ctx context.Context, data []byte) error {
+func (conn *Conn) SendString(ctx context.Context, data []byte) error {
 	if len(data) == 0 {
 		return ErrEmptyPayload
 	}
@@ -268,7 +266,7 @@ func (conn *Conn[KeyType]) SendString(ctx context.Context, data []byte) error {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
+func (conn *Conn) SendJSON(ctx context.Context, v any) error {
 	if v == nil {
 		return ErrEmptyPayload
 	}
@@ -289,7 +287,7 @@ func (conn *Conn[KeyType]) SendJSON(ctx context.Context, v any) error {
 // Ping sends a WebSocket ping frame and waits for it to be sent.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-func (conn *Conn[Key]) Ping() error {
+func (conn *Conn) Ping() error {
 	if conn.isClosed.Load() {
 		return fatal(ErrConnClosed)
 	}
@@ -320,7 +318,7 @@ func (conn *Conn[Key]) Ping() error {
 // Automatically closes the connection on failure.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-func (conn *Conn[KeyType]) Pong(payload []byte) {
+func (conn *Conn) Pong(payload []byte) {
 	if conn.isClosed.Load() {
 		return
 	}

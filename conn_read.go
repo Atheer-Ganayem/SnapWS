@@ -10,13 +10,13 @@ import (
 
 // ConnReader provides an io.Reader interface over a websocket message (frame group).
 // It supports reading fragmented frames as a single continuous stream.
-type ConnReader[KeyType comparable] struct {
-	conn    *Conn[KeyType]
+type ConnReader struct {
+	conn    *Conn
 	message *message // Group of frames making up the complete message
 	eof     bool     // Indicates if all frames have been fully read
 }
 
-func (conn *Conn[KeyType]) readLoop() {
+func (conn *Conn) readLoop() {
 	for {
 		frame, code, err := conn.acceptFrame()
 		if code == CloseNormalClosure && frame != nil {
@@ -41,7 +41,7 @@ func (conn *Conn[KeyType]) readLoop() {
 // acceptFrame reads and parses a single WebSocket frame.
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
-func (conn *Conn[KeyType]) acceptFrame() (*frame, uint16, error) {
+func (conn *Conn) acceptFrame() (*frame, uint16, error) {
 	for {
 		buf := conn.readFrameBuf
 		offset := 0
@@ -58,7 +58,7 @@ func (conn *Conn[KeyType]) acceptFrame() (*frame, uint16, error) {
 			}
 
 			length, err := readLength(buf[:offset])
-			if conn.Manager.MaxMessageSize != -1 && length > conn.Manager.MaxMessageSize {
+			if conn.upgrader.MaxMessageSize != -1 && length > conn.upgrader.MaxMessageSize {
 				return nil, CloseMessageTooBig, ErrTooLargePayload
 			}
 			if length == offset {
@@ -107,14 +107,14 @@ func (conn *Conn[KeyType]) acceptFrame() (*frame, uint16, error) {
 				return frame, CloseNormalClosure, io.EOF
 
 			case OpcodePing:
-				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
 					return nil, CloseInternalServerErr, ErrInternalServer
 				}
 				go conn.Pong(frame.payload())
 				continue
 
 			case OpcodePong:
-				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
 					return nil, CloseInternalServerErr, ErrInternalServer
 				}
 				continue
@@ -128,9 +128,9 @@ func (conn *Conn[KeyType]) acceptFrame() (*frame, uint16, error) {
 // This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
 // Control frames will be handled automatically by the accetFrame method, they wont be returned.
 // the length of returned frames group is always >= 1.
-func (conn *Conn[KeyType]) acceptMessage() {
+func (conn *Conn) acceptMessage() {
 	for {
-		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.Manager.ReadWait)); err != nil {
+		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
 			conn.CloseWithCode(ClosePolicyViolation, "failed to set a deadline")
 			return
 		}
@@ -163,10 +163,10 @@ func (conn *Conn[KeyType]) acceptMessage() {
 			}
 
 			frameCount++
-			if conn.Manager.MaxMessageSize != -1 && message.Payload.Len()+frame.PayloadLength > conn.Manager.MaxMessageSize {
+			if conn.upgrader.MaxMessageSize != -1 && message.Payload.Len()+frame.PayloadLength > conn.upgrader.MaxMessageSize {
 				conn.CloseWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
 				return
-			} else if conn.Manager.ReaderMaxFragments > 0 && frameCount > conn.Manager.ReaderMaxFragments {
+			} else if conn.upgrader.ReaderMaxFragments > 0 && frameCount > conn.upgrader.ReaderMaxFragments {
 				conn.CloseWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
 				return
 			}
@@ -194,7 +194,7 @@ func (conn *Conn[KeyType]) acceptMessage() {
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
 // If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader[KeyType], int8, error) {
+func (conn *Conn) NextReader(ctx context.Context) (*ConnReader, int8, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -217,7 +217,7 @@ func (conn *Conn[KeyType]) NextReader(ctx context.Context) (*ConnReader[KeyType]
 // It reads sequentially across multiple frames if needed, until `p` is full or EOF is reached.
 // Returns the number of bytes read and any error encountered.
 // When all frames are fully consumed, it returns io.EOF.
-func (r *ConnReader[KeyType]) Read(p []byte) (n int, err error) {
+func (r *ConnReader) Read(p []byte) (n int, err error) {
 	if r.eof {
 		return 0, io.EOF
 	}
@@ -245,7 +245,7 @@ func (r *ConnReader[KeyType]) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (r *ConnReader[KeyType]) Payload() []byte {
+func (r *ConnReader) Payload() []byte {
 	return r.message.Payload.Bytes()
 }
 
@@ -253,7 +253,7 @@ func (r *ConnReader[KeyType]) Payload() []byte {
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
 // The context controls cancellation or timeout. If the connection is closed or the context expires,
 // it returns an appropriate error.
-func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data []byte, err error) {
+func (conn *Conn) ReadMessage(ctx context.Context) (msgType int8, data []byte, err error) {
 	if conn.isClosed.Load() {
 		return -1, nil, fatal(ErrConnClosed)
 	}
@@ -276,7 +276,7 @@ func (conn *Conn[KeyType]) ReadMessage(ctx context.Context) (msgType int8, data 
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err error) {
+func (conn *Conn) ReadBinary(ctx context.Context) (data []byte, err error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return nil, err
@@ -294,7 +294,7 @@ func (conn *Conn[KeyType]) ReadBinary(ctx context.Context) (data []byte, err err
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) ReadString(ctx context.Context) ([]byte, error) {
+func (conn *Conn) ReadString(ctx context.Context) ([]byte, error) {
 	msgType, payload, err := conn.ReadMessage(ctx)
 	if err != nil {
 		return nil, err // Connection already close by acceptMessage()
@@ -314,7 +314,7 @@ func (conn *Conn[KeyType]) ReadString(ctx context.Context) ([]byte, error) {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn[KeyType]) ReadJSON(ctx context.Context, v any) error {
+func (conn *Conn) ReadJSON(ctx context.Context, v any) error {
 	reader, msgType, err := conn.NextReader(ctx)
 	if err != nil {
 		return err

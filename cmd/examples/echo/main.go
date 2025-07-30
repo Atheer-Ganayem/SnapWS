@@ -4,19 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
-var manager *snapws.Manager[string]
+var upgrader *snapws.Upgrader
 
 func main() {
-	manager = snapws.NewManager(&snapws.Options[string]{
-		PingEvery: time.Second * 25,
-		ReadWait:  time.Second * 30,
-	})
-	defer manager.Shutdown()
+	upgrader = snapws.NewUpgrader(nil)
 
 	http.HandleFunc("/", handler)
 
@@ -25,7 +20,7 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	conn, err := manager.Connect(r.RemoteAddr, w, r)
+	conn, err := upgrader.Upgrade(w, r)
 	if err != nil {
 		return
 	}

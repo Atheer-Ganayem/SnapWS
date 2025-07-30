@@ -27,7 +27,7 @@ func TestNewManager(t *testing.T) {
 	}
 
 	// Test with custom options
-	opts := &Options[string]{
+	opts := &Options{
 		WriteWait:            time.Second * 10,
 		ReadWait:             time.Second * 30,
 		MaxMessageSize:       2048,
@@ -35,25 +35,25 @@ func TestNewManager(t *testing.T) {
 		RejectRaw:            true,
 		BackpressureStrategy: BackpressureDrop,
 	}
-	manager2 := NewManager(opts)
-	if manager2.WriteWait != time.Second*10 {
-		t.Errorf("WriteWait = %v, want %v", manager2.WriteWait, time.Second*10)
+	upgrader2 := NewManager[string](NewUpgrader(opts))
+	if upgrader2.Upgrader.WriteWait != time.Second*10 {
+		t.Errorf("WriteWait = %v, want %v", upgrader2.Upgrader.WriteWait, time.Second*10)
 	}
-	if manager2.MaxMessageSize != 2048 {
-		t.Errorf("MaxMessageSize = %v, want %v", manager2.MaxMessageSize, 2048)
+	if upgrader2.Upgrader.MaxMessageSize != 2048 {
+		t.Errorf("MaxMessageSize = %v, want %v", upgrader2.Upgrader.MaxMessageSize, 2048)
 	}
-	if !manager2.RejectRaw {
+	if !upgrader2.Upgrader.RejectRaw {
 		t.Error("RejectRaw should be true")
 	}
 }
 
 func TestManagerRegister(t *testing.T) {
 	manager := NewManager[string](nil)
-	mockConn1 := newMockConn()
-	mockConn2 := newMockConn()
+	mockConn1 := manager.Upgrader.newConn(newMockConn(), "")
+	mockConn2 := manager.Upgrader.newConn(newMockConn(), "")
 
-	conn1 := manager.newConn(mockConn1, "user1", "")
-	conn2 := manager.newConn(mockConn2, "user2", "")
+	conn1 := manager.newManagedConn(mockConn1, "user1")
+	conn2 := manager.newManagedConn(mockConn2, "user2")
 
 	// Register first connection
 	manager.Register("user1", conn1)
@@ -68,7 +68,8 @@ func TestManagerRegister(t *testing.T) {
 	}
 
 	// Replace existing connection
-	conn3 := manager.newConn(newMockConn(), "user1", "")
+	mockConn3 := manager.Upgrader.newConn(newMockConn(), "")
+	conn3 := manager.newManagedConn(mockConn3, "user1")
 	manager.Register("user1", conn3)
 	if len(manager.Conns) != 2 {
 		t.Errorf("Expected 2 connections after replacement, got %d", len(manager.Conns))
@@ -81,7 +82,7 @@ func TestManagerRegister(t *testing.T) {
 func TestManagerUnregister(t *testing.T) {
 	manager := NewManager[string](nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "user1", "")
+	conn := manager.newManagedConn(manager.Upgrader.newConn(mockConn, ""), "user1")
 
 	manager.Register("user1", conn)
 
@@ -104,7 +105,7 @@ func TestManagerUnregister(t *testing.T) {
 func TestManagerGetConn(t *testing.T) {
 	manager := NewManager[string](nil)
 	mockConn := newMockConn()
-	conn := manager.newConn(mockConn, "user1", "")
+	conn := manager.newManagedConn(manager.Upgrader.newConn(mockConn, ""), "user1")
 
 	manager.Register("user1", conn)
 
@@ -135,8 +136,8 @@ func TestManagerGetAllConns(t *testing.T) {
 
 	// Add connections
 	for i := 0; i < 3; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		uConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(uConn, fmt.Sprintf("user%d", i))
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
 
@@ -151,8 +152,8 @@ func TestManagerGetAllConnsWithExclude(t *testing.T) {
 
 	// Add connections
 	for i := 0; i < 3; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
 
@@ -195,8 +196,8 @@ func TestManagerBroadcastString(t *testing.T) {
 
 	// Add some connections
 	for i := 0; i < 3; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		go conn.listen()
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
@@ -230,8 +231,8 @@ func TestManagerBroadcastBytes(t *testing.T) {
 
 	// Add some connections
 	for i := 0; i < 3; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		go conn.listen()
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
@@ -264,11 +265,11 @@ func TestManagerUse(t *testing.T) {
 	}
 
 	// Test adding middlewares
-	manager.Use(middleware1)
-	manager.Use(middleware2)
+	manager.Upgrader.Use(middleware1)
+	manager.Upgrader.Use(middleware2)
 
-	if len(manager.Middlwares) != 2 {
-		t.Errorf("Expected 2 middlewares, got %d", len(manager.Middlwares))
+	if len(manager.Upgrader.Middlwares) != 2 {
+		t.Errorf("Expected 2 middlewares, got %d", len(manager.Upgrader.Middlwares))
 	}
 }
 
@@ -277,8 +278,8 @@ func TestManagerShutdown(t *testing.T) {
 
 	// Add some connections
 	for i := 0; i < 5; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		go conn.listen()
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
@@ -459,8 +460,8 @@ func TestSelectSubProtocol(t *testing.T) {
 	}
 }
 
-func TestManagerHandshake(t *testing.T) {
-	manager := NewManager[string](nil)
+func TestUpgrade(t *testing.T) {
+	upgrader := NewUpgrader(nil)
 
 	// Create a valid WebSocket request
 	key := base64.StdEncoding.EncodeToString(make([]byte, 16))
@@ -547,7 +548,7 @@ func TestManagerHandshake(t *testing.T) {
 
 			// Note: This will fail for valid cases because we can't actually hijack in tests
 			// but we can test the validation logic
-			_, _, err := manager.handShake(w, req)
+			_, err := upgrader.Upgrade(w, req)
 
 			if tt.wantError && err == nil {
 				t.Error("Expected error but got none")
@@ -556,12 +557,12 @@ func TestManagerHandshake(t *testing.T) {
 	}
 }
 
-func TestManagerHandshakeWithSubProtocols(t *testing.T) {
-	opts := &Options[string]{
+func TestUpgraderHandshakeWithSubProtocols(t *testing.T) {
+	opts := &Options{
 		SubProtocols: []string{"echo", "chat"},
 		RejectRaw:    false,
 	}
-	manager := NewManager(opts)
+	upgrader := NewUpgrader(opts)
 
 	key := base64.StdEncoding.EncodeToString(make([]byte, 16))
 
@@ -592,7 +593,7 @@ func TestManagerHandshakeWithSubProtocols(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager.RejectRaw = tt.rejectRaw
+			upgrader.RejectRaw = tt.rejectRaw
 
 			req := httptest.NewRequest("GET", "/ws", nil)
 			req.Header.Set("Connection", "upgrade")
@@ -605,7 +606,7 @@ func TestManagerHandshakeWithSubProtocols(t *testing.T) {
 
 			w := httptest.NewRecorder()
 
-			_, protocol, err := manager.handShake(w, req)
+			conn, err := upgrader.Upgrade(w, req)
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -620,18 +621,18 @@ func TestManagerHandshakeWithSubProtocols(t *testing.T) {
 				}
 			}
 
-			if protocol != tt.expectedProtocol {
-				t.Errorf("Expected protocol %v, got %v", tt.expectedProtocol, protocol)
+			if conn.SubProtocol != tt.expectedProtocol {
+				t.Errorf("Expected protocol %v, got %v", tt.expectedProtocol, conn.SubProtocol)
 			}
 		})
 	}
 }
 
 func TestManagerHandshakeWithMiddleware(t *testing.T) {
-	manager := NewManager[string](nil)
+	upgrader := NewUpgrader(nil)
 
 	// Add middleware that returns an error
-	manager.Use(func(w http.ResponseWriter, r *http.Request) error {
+	upgrader.Use(func(w http.ResponseWriter, r *http.Request) error {
 		return NewMiddlewareErr(http.StatusUnauthorized, "unauthorized")
 	})
 
@@ -644,7 +645,7 @@ func TestManagerHandshakeWithMiddleware(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	_, _, err := manager.handShake(w, req)
+	_, err := upgrader.Upgrade(w, req)
 	if err == nil {
 		t.Error("Expected middleware error")
 	}
@@ -673,7 +674,7 @@ func TestWebSocketKeyGeneration(t *testing.T) {
 // Test Options and BackpressureStrategy
 
 func TestOptionsWithDefault(t *testing.T) {
-	opts := &Options[string]{}
+	opts := &Options{}
 	opts.WithDefault()
 
 	if opts.WriteWait != defaultWriteWait {
@@ -745,23 +746,23 @@ func TestMiddlewareErr(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkManagerRegister(b *testing.B) {
-	manager := NewManager[string](nil)
+	manager := NewManager[string](NewUpgrader(nil))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
 }
 
 func BenchmarkManagerGetConn(b *testing.B) {
-	manager := NewManager[string](nil)
+	manager := NewManager[string](NewUpgrader(nil))
 
 	// Setup connections
 	for i := 0; i < 1000; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
 
@@ -777,9 +778,8 @@ func BenchmarkManagerBroadcast(b *testing.B) {
 
 	// Setup connections
 	for i := 0; i < 100; i++ {
-		mockConn := newMockConn()
-		conn := manager.newConn(mockConn, fmt.Sprintf("user%d", i), "")
-		go conn.listen()
+		mockConn := manager.Upgrader.newConn(newMockConn(), "")
+		conn := manager.newManagedConn(mockConn, fmt.Sprintf("user%d", i))
 		manager.Register(fmt.Sprintf("user%d", i), conn)
 	}
 
