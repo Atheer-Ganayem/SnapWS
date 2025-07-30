@@ -72,7 +72,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string) *Conn {
 
 		outboundControl: make(chan *sendFrameRequest, u.OutboundControlSize),
 
-		readFrameBuf: make([]byte, u.ReadBufferSize),
+		readFrameBuf: u.getReadBuf(),
 	}
 
 	conn.reader = ConnReader{conn: conn}
@@ -242,15 +242,20 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		}
 		close(conn.writer.sig)
 		close(conn.outboundControl)
-		close(conn.inboundMessages)
 		close(conn.inboundFrames)
 		close(conn.writer.lock)
+		close(conn.inboundMessages)
 
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
 
-		// conn.Manager.unregister(conn.Key) // later
+		if conn.upgrader.PoolReadBuffers {
+			conn.upgrader.ReadPool.Put(&conn.readFrameBuf)
+		}
+		if conn.upgrader.PoolWriteBuffers {
+			conn.upgrader.WritePool.Put(&conn.writer.buf)
+		}
 	})
 }
 

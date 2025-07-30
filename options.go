@@ -56,6 +56,13 @@ type Options struct {
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
 
+	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
+	// but may increase latency in some scenarios. Disabled by default.
+	PoolReadBuffers bool
+	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
+	// but may increase latency in some scenarios. Disabled by default.
+	PoolWriteBuffers bool
+
 	// the size of iboundFrames chan buffer, if not set it will default to 32
 	// Note: if the consumer is too slow and the channel gets full, the connection will be droped.
 	InboundFramesSize int

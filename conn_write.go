@@ -32,7 +32,7 @@ type ConnWriter struct {
 func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
 	return &ConnWriter{
 		conn:   conn,
-		buf:    make([]byte, conn.upgrader.WriteBufferSize),
+		buf:    conn.upgrader.getWriteBuf(),
 		opcode: opcode,
 		lock:   make(chan struct{}, 1),
 		sig:    make(chan struct{}),

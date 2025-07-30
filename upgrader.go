@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 )
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -14,6 +15,8 @@ const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // Hold snap.Options. If you wanna learn more about the options go see their docs.
 type Upgrader struct {
 	*Options
+	ReadPool  sync.Pool
+	WritePool sync.Pool
 }
 
 // Created a new upgrader with the given options.
@@ -24,9 +27,44 @@ func NewUpgrader(opts *Options) *Upgrader {
 	}
 	opts.WithDefault()
 
-	return &Upgrader{
+	u := &Upgrader{
 		Options: opts,
 	}
+
+	if opts.PoolReadBuffers {
+		u.ReadPool = sync.Pool{
+			New: func() any {
+				b := make([]byte, opts.ReadBufferSize)
+				return &b
+			},
+		}
+	}
+	if opts.PoolWriteBuffers {
+		u.WritePool = sync.Pool{
+			New: func() any {
+				b := make([]byte, opts.WriteBufferSize)
+				return &b
+			},
+		}
+	}
+
+	return u
+}
+
+func (u *Upgrader) getReadBuf() []byte {
+	if u.PoolReadBuffers {
+		return *u.ReadPool.Get().(*[]byte)
+	}
+
+	return make([]byte, u.ReadBufferSize)
+}
+
+func (u *Upgrader) getWriteBuf() []byte {
+	if u.PoolWriteBuffers {
+		return *u.WritePool.Get().(*[]byte)
+	}
+
+	return make([]byte, u.WriteBufferSize)
 }
 
 // Upgrades an HTTP connection to a Websocket connection.
