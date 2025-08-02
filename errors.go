@@ -46,6 +46,7 @@ var (
 	ErrTooLargePayload         = errors.New("payload length too large")
 	ErrInvalidFrameSeq         = errors.New("invalid frame sequence: expected continuation")
 	ErrInvalidControlFrame     = errors.New("invalid control frame")
+	ErrReceivedReservedBits    = errors.New("receve unnegtioated reserved bits")
 	errExpectedMaskedFrame     = errors.New("received unmasked frame, all frames from the client must be masked")
 	ErrMessageTooLarge         = errors.New("message received from client was too large")
 	ErrTooMuchFragments        = errors.New("receive too much fragments for a signle message")
@@ -71,4 +72,8 @@ var (
 
 	ErrInternalServer = errors.New("something went wrong")
 	ErrSlowConsumer   = errors.New("slow consumer/client")
+	ErrTimeout        = errors.New("time out")
+	ErrWriteFaild     = errors.New("faild to write to conn")
+
+	ErrShortFrame = errors.New("frame too short")
 )

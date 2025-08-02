@@ -35,7 +35,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		data, err := conn.ReadString(context.TODO())
+		data, err := conn.ReadString()
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {

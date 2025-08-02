@@ -51,17 +51,16 @@ type Options struct {
 	// maximum fragremnt allowed per an incoming message.
 	// if not set it will default to 0, which means there is no limit.
 	ReaderMaxFragments int
-	// if not set it will default to 4096 bytes
+	// if not set it will use the default http buffers (4kb)
 	ReadBufferSize int
 	// if not set it will default to 4096 bytes
 	WriteBufferSize int
 
 	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
 	// but may increase latency in some scenarios. Disabled by default.
-	PoolReadBuffers bool
-	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
-	// but may increase latency in some scenarios. Disabled by default.
 	PoolWriteBuffers bool
+	// Disabled by default.
+	PoolFrames bool
 
 	// the size of iboundFrames chan buffer, if not set it will default to 32
 	// Note: if the consumer is too slow and the channel gets full, the connection will be droped.
@@ -111,9 +110,6 @@ func (opt *Options) WithDefault() {
 	}
 	if opt.MaxMessageSize == 0 {
 		opt.MaxMessageSize = DefaultMaxMessageSize
-	}
-	if opt.ReadBufferSize == 0 {
-		opt.ReadBufferSize = DefaultReadBufferSize
 	}
 	if opt.WriteBufferSize == 0 {
 		opt.WriteBufferSize = DefaultWriteBufferSize

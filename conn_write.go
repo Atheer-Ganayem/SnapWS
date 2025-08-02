@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"time"
 	"unicode/utf8"
@@ -192,7 +193,6 @@ func (conn *Conn) sendFrame(buf []byte) error {
 	}
 
 	written := 0
-
 	for written < len(buf) {
 		n, err := conn.raw.Write(buf[written:])
 		if err != nil {
@@ -287,6 +287,45 @@ func (conn *Conn) SendJSON(ctx context.Context, v any) error {
 	return w.Close()
 }
 
+// Writes close frame to the ControlWriter.
+// Receive a uint16 closeCode and a string reason and return an error.
+// It tries to write the control frame within the the duration given in: conn.upgrader.WriteWait.
+func (conn *Conn) writeClose(closeCode uint16, reason string) error {
+	t := time.After(conn.upgrader.WriteWait)
+	select {
+	case conn.ControlWriter.lock <- struct{}{}:
+		conn.ControlWriter.buf = conn.ControlWriter.buf[:2]
+		conn.ControlWriter.buf[0] = 0x80 + OpcodeClose
+		conn.ControlWriter.buf[1] = 2
+		binary.BigEndian.AppendUint16(conn.ControlWriter.buf, closeCode)
+
+		if len(reason) <= MaxControlFramePayload-2 {
+			conn.ControlWriter.buf[1] += byte(len(reason))
+			conn.ControlWriter.buf = append(conn.ControlWriter.buf, reason...)
+		}
+
+		select {
+		case conn.ControlWriter.sig <- struct{}{}:
+		default:
+			<-conn.ControlWriter.lock
+			return ErrWriteFaild
+		}
+		<-conn.ControlWriter.lock
+	case <-t:
+		return fatal(ErrTimeout)
+	}
+
+	select {
+	case err, ok := <-conn.ControlWriter.err:
+		if !ok {
+			return fatal(ErrChannelClosed)
+		}
+		return err
+	case <-t:
+		return ErrTimeout
+	}
+}
+
 // Ping sends a WebSocket ping frame and waits for it to be sent.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
@@ -295,26 +334,26 @@ func (conn *Conn) Ping() error {
 		return fatal(ErrConnClosed)
 	}
 
-	frame, err := newFrame(true, OpcodePing, false, nil)
-	if err != nil {
-		return err
-	}
+	t := time.After(conn.upgrader.WriteWait)
 
-	errCh := make(chan error)
 	select {
 	case <-conn.done:
 		return fatal(ErrConnClosed)
-	case conn.outboundControl <- &sendFrameRequest{
-		frame: &frame,
-		errCh: errCh,
-		ctx:   nil,
-	}:
-	default:
-		return fatal(ErrSlowConsumer)
+	case conn.ControlWriter.lock <- struct{}{}:
+		conn.ControlWriter.buf = conn.ControlWriter.buf[:2]
+		conn.ControlWriter.buf[0] = 0x80 + OpcodePing
+		select {
+		case conn.ControlWriter.sig <- struct{}{}:
+		default:
+			<-conn.ControlWriter.lock
+			return ErrWriteFaild
+		}
+		<-conn.ControlWriter.lock
+	case <-t:
+		return fatal(ErrTimeout)
 	}
 
-	err = <-errCh
-	return err
+	return conn.ControlWriter.sendControl(t)
 }
 
 // Pong sends a pong control frame in response to a ping.
@@ -326,25 +365,37 @@ func (conn *Conn) Pong(payload []byte) {
 		return
 	}
 
-	frame, err := newFrame(true, OpcodePong, false, payload)
-	if err != nil {
-		conn.CloseWithCode(CloseInternalServerErr, "faild to create pong frame")
-		return
-	}
-
-	errCh := make(chan error)
+	t := time.After(conn.upgrader.WriteWait)
 	select {
 	case <-conn.done:
 		return
-	case conn.outboundControl <- &sendFrameRequest{frame: &frame, errCh: errCh, ctx: nil}:
-	default:
-		conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
+	case conn.ControlWriter.lock <- struct{}{}:
+		conn.ControlWriter.buf = conn.ControlWriter.buf[:2]
+		conn.ControlWriter.buf[0] = 0x80 + OpcodePing
+		select {
+		case conn.ControlWriter.sig <- struct{}{}:
+		default:
+			<-conn.ControlWriter.lock
+			return
+		}
+		<-conn.ControlWriter.lock
+	case <-t:
 		return
 	}
 
-	err = <-errCh
-	if IsFatalErr(err) {
-		conn.CloseWithCode(CloseInternalServerErr, err.Error())
-		return
+	_ = conn.ControlWriter.sendControl(t)
+}
+
+func (cw *ControlWriter) sendControl(t <-chan time.Time) error {
+	select {
+	case <-cw.conn.done:
+		return fatal(ErrConnClosed)
+	case err, ok := <-cw.err:
+		if !ok {
+			return fatal(ErrChannelClosed)
+		}
+		return err
+	case <-t:
+		return ErrTimeout
 	}
 }

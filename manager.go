@@ -57,7 +57,7 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 		return nil, err
 	}
 
-	conn := &ManagedConn[KeyType]{Conn: c, Key: key, Manager: m}
+	conn := m.newManagedConn(c, key)
 
 	m.Register(key, conn)
 

@@ -1,7 +1,7 @@
 package snapws
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/binary"
 	"net"
@@ -18,8 +18,11 @@ import (
 //
 // Reader and Writer aren't safe to use from multiple Go routines.
 type Conn struct {
-	raw         net.Conn
-	upgrader    *Upgrader
+	raw net.Conn
+	// curently this is a server library, this is saved for future use
+	isServer bool
+	upgrader *Upgrader
+	// Empty string means its a raw websocket
 	SubProtocol string
 	MetaData    sync.Map
 	// channel used to signal that the conn is closed.
@@ -28,20 +31,16 @@ type Conn struct {
 	done      chan struct{}
 	isClosed  atomic.Bool
 	closeOnce sync.Once
-	// Empty string means its a raw websocket
 
-	inboundFrames   chan *frame
-	inboundMessages chan *message
 	// ticker for ping loop
 	ticker *time.Ticker
-
-	// used for sending control frames.
-	outboundControl chan *sendFrameRequest
 
 	reader ConnReader
 	writer *ConnWriter
 
-	readFrameBuf []byte
+	readBuf *bufio.Reader
+
+	ControlWriter *ControlWriter
 }
 
 // ManagedConn is a Conn that is tracked by a Manager.
@@ -53,33 +52,48 @@ type ManagedConn[KeyType comparable] struct {
 	Manager *Manager[KeyType]
 }
 
-type sendFrameRequest struct {
-	frame *frame
-	errCh chan error
-	ctx   context.Context
+type ControlWriter struct {
+	conn *Conn
+	buf  []byte
+	sig  chan struct{}
+	err  chan error
+	lock chan struct{} // full = locked
 }
 
-func (u *Upgrader) newConn(c net.Conn, subProtocol string) *Conn {
+func (conn *Conn) NewControlWriter() *ControlWriter {
+	return &ControlWriter{
+		conn: conn,
+		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
+		sig:  make(chan struct{}),
+		err:  make(chan error),
+		lock: make(chan struct{}, 1),
+	}
+}
+
+func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Conn {
 	conn := &Conn{
 		raw:         c,
+		isServer:    true,
 		upgrader:    u,
 		SubProtocol: subProtocol,
 		done:        make(chan struct{}),
 		ticker:      time.NewTicker(u.PingEvery),
+	}
 
-		inboundFrames:   make(chan *frame, u.InboundFramesSize),
-		inboundMessages: make(chan *message, u.InboundMessagesSize),
-
-		outboundControl: make(chan *sendFrameRequest, u.OutboundControlSize),
-
-		readFrameBuf: u.getReadBuf(),
+	size := u.ReadBufferSize
+	if size == 0 && br != nil {
+		conn.readBuf = br
+	} else {
+		if size < MaxHeaderSize {
+			size += MaxHeaderSize
+		}
+		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
 	}
 
 	conn.reader = ConnReader{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText)
+	conn.ControlWriter = conn.NewControlWriter()
 
-	go conn.readLoop()
-	go conn.acceptMessage()
 	go conn.listen()
 	go conn.pingLoop()
 
@@ -90,25 +104,16 @@ func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[
 	return &ManagedConn[KeyType]{Conn: conn, Key: key, Manager: m}
 }
 
-func (conn *Conn) sendMessageToChan(m *message) {
-	select {
-	case <-conn.done:
-	case conn.inboundMessages <- m:
-	default:
-		switch conn.upgrader.BackpressureStrategy {
-		case BackpressureClose:
-			conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
-			return
-		case BackpressureDrop:
-			return
-		case BackpressureWait:
-			select {
-			case <-conn.done:
-			case conn.inboundMessages <- m:
-			}
-			return
-		}
+func (conn *Conn) nRead(n int) ([]byte, error) {
+	b, err := conn.readBuf.Peek(n)
+	if err != nil {
+		return nil, err
 	}
+
+	// never fails
+	_, _ = conn.readBuf.Discard(n)
+
+	return b, nil
 }
 
 // Locks "wLock" indicating that a writer has been intiated.
@@ -147,30 +152,14 @@ func (conn *Conn) unlockW() error {
 func (conn *Conn) listen() {
 	for {
 		select {
-		case req, ok := <-conn.outboundControl:
+		case _, ok := <-conn.ControlWriter.sig:
 			if !ok {
-				if req != nil {
-					trySendErr(req.errCh, ErrChannelClosed)
-				}
+				conn.ControlWriter.err <- fatal(ErrChannelClosed)
 				return
 			}
-			if req == nil {
-				break
-			}
-			if req.ctx != nil && req.ctx.Err() != nil {
-				trySendErr(req.errCh, req.ctx.Err())
-				break
-			}
 
-			if req.frame.OPCODE == OpcodeClose {
-				trySendErr(req.errCh, conn.sendFrame(req.frame.Encoded))
-			} else {
-				select {
-				case <-conn.done:
-				default:
-					trySendErr(req.errCh, conn.sendFrame(req.frame.Encoded))
-				}
-			}
+			err := conn.sendFrame(conn.ControlWriter.buf)
+			conn.ControlWriter.err <- err
 
 		case _, ok := <-conn.writer.sig:
 			if !ok {
@@ -211,27 +200,9 @@ func (conn *Conn) pingLoop() {
 func (conn *Conn) CloseWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
 		close(conn.done)
-		buf := new(bytes.Buffer)
-		_ = binary.Write(buf, binary.BigEndian, code)
-		buf.WriteString(reason)
-		payload := buf.Bytes()
 
-		frame, err := newFrame(true, OpcodeClose, false, payload)
-
-		errCh := make(chan error)
-		if err == nil && !conn.isClosed.Load() {
-			select {
-			case conn.outboundControl <- &sendFrameRequest{
-				frame: &frame,
-				errCh: errCh,
-			}:
-			default:
-			}
-		}
-
-		select {
-		case <-errCh:
-		case <-time.After(conn.upgrader.WriteWait):
+		if !conn.isClosed.Load() {
+			_ = conn.writeClose(code, reason)
 		}
 
 		conn.writer.Close()
@@ -241,18 +212,12 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 			conn.ticker.Stop()
 		}
 		close(conn.writer.sig)
-		close(conn.outboundControl)
-		close(conn.inboundFrames)
 		close(conn.writer.lock)
-		close(conn.inboundMessages)
 
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
 
-		if conn.upgrader.PoolReadBuffers {
-			conn.upgrader.ReadPool.Put(&conn.readFrameBuf)
-		}
 		if conn.upgrader.PoolWriteBuffers {
 			conn.upgrader.WritePool.Put(&conn.writer.buf)
 		}
@@ -263,11 +228,18 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 // The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
 // The rest of the payload is optional, represnting a UTF-8 reason.
 // Any violations would cause a close with CloseProtocolError with the apropiate reason.
-func (conn *Conn) CloseWithPayload(payload []byte) {
-	if len(payload) < 2 {
+func (conn *Conn) CloseWithPayload(n int) {
+	if n < 2 {
 		conn.CloseWithCode(CloseProtocolError, "invalid close frame payload")
 		return
 	}
+
+	payload, err := conn.nRead(n)
+	if err != nil {
+		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+		return
+	}
+
 	code := binary.BigEndian.Uint16(payload[:2])
 	if !isValidCloseCode(code) {
 		conn.CloseWithCode(CloseProtocolError, "invalid close code")
@@ -295,8 +267,8 @@ func (conn *ManagedConn[KeyType]) CloseWithCode(code uint16, reason string) {
 	conn.Conn.CloseWithCode(code, reason)
 	conn.Manager.unregister(conn.Key)
 }
-func (conn *ManagedConn[KeyType]) CloseWithPayload(payload []byte) {
-	conn.Conn.CloseWithPayload(payload)
+func (conn *ManagedConn[KeyType]) CloseWithPayload(n int) {
+	conn.Conn.CloseWithPayload(n)
 	conn.Manager.unregister(conn.Key)
 }
 

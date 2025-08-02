@@ -1,8 +1,7 @@
 package snapws
 
 import (
-	"bytes"
-	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"time"
@@ -15,181 +14,100 @@ import (
 //     at a time. Concurrent reads on the same connection or the same
 //     ConnReader are not supported.
 type ConnReader struct {
-	conn    *Conn
-	message *message // Group of frames making up the complete message
-	eof     bool     // Indicates if all frames have been fully read
-}
-
-func (conn *Conn) readLoop() {
-	for {
-		frame, code, err := conn.acceptFrame()
-		if code == CloseNormalClosure && frame != nil {
-			conn.CloseWithPayload(frame.payload())
-			return
-		} else if err != nil {
-			conn.CloseWithCode(code, err.Error())
-			return
-		}
-
-		select {
-		case <-conn.done:
-			return
-		case conn.inboundFrames <- frame:
-		default:
-			conn.CloseWithCode(ClosePolicyViolation, ErrSlowConsumer.Error())
-			return
-		}
-	}
+	conn      *Conn
+	fin       bool
+	maskKey   [4]byte
+	maskPos   int
+	remaining int
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
 // Returns a websocket frame, uint16 representing close reason (if error), and an error.
 // Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
-func (conn *Conn) acceptFrame() (*frame, uint16, error) {
+func (conn *Conn) acceptFrame() (int8, error) {
 	for {
-		buf := conn.readFrameBuf
-		offset := 0
-		var data []byte
-
-		for {
-			n, err := conn.raw.Read(buf[offset:])
-			if err != nil && err != io.EOF {
-				return nil, CloseProtocolError, err
-			}
-			offset += n
-			if err == io.EOF {
-				break
-			}
-
-			length, err := readLength(buf[:offset])
-			if conn.upgrader.MaxMessageSize != -1 && length > conn.upgrader.MaxMessageSize {
-				return nil, CloseMessageTooBig, ErrTooLargePayload
-			}
-			if length == offset {
-				break
-			}
-			if IsFatalErr(err) {
-				return nil, CloseProtocolError, err
-			} else if err == nil {
-				if offset > length {
-					return nil, CloseProtocolError, ErrInvalidPayloadLength
-				}
-				if length > len(buf) {
-					data = make([]byte, length)
-					copy(data, buf[:offset])
-					n, err = io.ReadFull(conn.raw, data[offset:])
-				} else {
-					n, err = io.ReadFull(conn.raw, buf[offset:length])
-				}
-				offset += n
-				if err != nil && err != io.EOF {
-					return nil, CloseProtocolError, err
-				}
-				break
-			}
-		}
-
-		var frame *frame
-		var err error
-		if data == nil {
-			frame, err = readFrame(buf[:offset])
-		} else {
-			frame, err = readFrame(data[:offset])
-		}
+		b, err := conn.nRead(2)
 		if err != nil {
-			return nil, CloseProtocolError, err
-		} else if !frame.IsMasked {
-			return nil, CloseProtocolError, errExpectedMaskedFrame
+			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+			return -1, err
 		}
 
-		if frame.isControl() {
-			if !frame.isValidControl() {
-				return nil, CloseProtocolError, ErrInvalidControlFrame
+		fin := b[0]&0b10000000 == 128
+		rsv1 := b[0] & 0b01000000
+		rsv2 := b[0] & 0b00100000
+		rsv3 := b[0] & 0b00010000
+		opcode := b[0] & 0b00001111
+		isMasked := b[1]&0b10000000 == 128
+		lengthB := b[1] & 0b01111111
+
+		if !isVaidOpcode(opcode) {
+			conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
+			return -1, ErrInvalidOPCODE
+		}
+		if rsv1+rsv2+rsv3 != 0 {
+			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
+			return -1, ErrReceivedReservedBits
+		}
+		if conn.isServer && !isMasked {
+			conn.CloseWithCode(CloseProtocolError, errExpectedMaskedFrame.Error())
+			return -1, errExpectedMaskedFrame
+		}
+
+		n := 0
+		switch lengthB {
+		case 127:
+			b, err := conn.nRead(8)
+			if err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return -1, err
 			}
-			switch frame.OPCODE {
-			case OpcodeClose:
-				return frame, CloseNormalClosure, io.EOF
+			n = int(binary.BigEndian.Uint64(b))
+		case 126:
+			b, err := conn.nRead(2)
+			if err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return -1, err
+			}
+			n = int(binary.BigEndian.Uint16(b))
+		default:
+			n = int(lengthB)
+		}
 
+		if isMasked {
+			b, err := conn.nRead(4)
+			if err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return -1, err
+			}
+			copy(conn.reader.maskKey[:], b)
+		}
+
+		if isControl(opcode) {
+			if n > 125 {
+				conn.CloseWithCode(CloseProtocolError, ErrInvalidControlFrame.Error())
+				return -1, ErrInvalidControlFrame
+			}
+			switch opcode {
+			case OpcodeClose: // TODO: i have to close with the payload
+				conn.CloseWithPayload(n)
+				return -1, fatal(ErrConnClosed)
 			case OpcodePing:
-				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-					return nil, CloseInternalServerErr, ErrInternalServer
-				}
-				go conn.Pong(frame.payload())
-				continue
-
+				conn.Pong(nil)
 			case OpcodePong:
 				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-					return nil, CloseInternalServerErr, ErrInternalServer
+					conn.CloseWithCode(CloseProtocolError, "time out")
 				}
-				continue
 			}
-		}
-		return frame, 0, nil
-	}
-}
-
-// This is the method used for accepting a full websocket message (text or binary).
-// This method will automatically close the connection with the appropriate close code on protocol errors or close frames.
-// Control frames will be handled automatically by the accetFrame method, they wont be returned.
-// the length of returned frames group is always >= 1.
-func (conn *Conn) acceptMessage() {
-	for {
-		if err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-			conn.CloseWithCode(ClosePolicyViolation, "failed to set a deadline")
-			return
-		}
-
-		frame, ok := <-conn.inboundFrames
-		if !ok {
-			return
-		}
-		if frame.OPCODE != OpcodeText && frame.OPCODE != OpcodeBinary {
-			conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-			return
-		}
-
-		message := &message{OPCODE: frame.OPCODE, Payload: bytes.NewBuffer(frame.payload())}
-
-		if frame.FIN {
-			conn.sendMessageToChan(message)
 			continue
 		}
 
-		frameCount := 1
-		for {
-			frame, ok := <-conn.inboundFrames
-			if !ok {
-				return
-			}
-			if frame.OPCODE != OpcodeContinuation {
-				conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-				return
-			}
+		//#######################
 
-			frameCount++
-			if conn.upgrader.MaxMessageSize != -1 && message.Payload.Len()+frame.PayloadLength > conn.upgrader.MaxMessageSize {
-				conn.CloseWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
-				return
-			} else if conn.upgrader.ReaderMaxFragments > 0 && frameCount > conn.upgrader.ReaderMaxFragments {
-				conn.CloseWithCode(CloseMessageTooBig, ErrTooMuchFragments.Error())
-				return
-			}
-			_, err := message.Payload.Write(frame.payload())
-			if err != nil {
-				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return
-			}
+		conn.reader.fin = fin
+		conn.reader.remaining = n
+		conn.reader.maskPos = 0
 
-			if frame.FIN {
-				break
-			}
-		}
-
-		if message.isText() && !message.isValidUTF8() {
-			conn.CloseWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
-			return
-		}
-		conn.sendMessageToChan(message)
+		return int8(opcode), nil
 	}
 }
 
@@ -198,23 +116,23 @@ func (conn *Conn) acceptMessage() {
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
 // If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn) NextReader(ctx context.Context) (*ConnReader, int8, error) {
-	if ctx == nil {
-		ctx = context.TODO()
+func (conn *Conn) NextReader() (*ConnReader, int8, error) {
+	if conn.isClosed.Load() {
+		return nil, -1, fatal(ErrConnClosed)
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, -1, ctx.Err()
-	case message, ok := <-conn.inboundMessages:
-		if !ok {
-			return nil, -1, fatal(ErrConnClosed)
-		}
-
-		conn.reader.eof = false
-		conn.reader.message = message
-		return &conn.reader, int8(message.OPCODE), nil
+	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
+	if err != nil {
+		conn.CloseWithCode(CloseProtocolError, "timeout")
+		return nil, 0, fatal(err)
 	}
+
+	opcode, err := conn.acceptFrame()
+	if err != nil {
+		return nil, -1, fatal(err)
+	}
+
+	return &conn.reader, opcode, nil
 }
 
 // Read reads data from the current frame group (message) into the provided byte slice `p`.
@@ -222,55 +140,72 @@ func (conn *Conn) NextReader(ctx context.Context) (*ConnReader, int8, error) {
 // Returns the number of bytes read and any error encountered.
 // When all frames are fully consumed, it returns io.EOF.
 func (r *ConnReader) Read(p []byte) (n int, err error) {
-	if r.eof {
+	if r.remaining == 0 && r.fin {
 		return 0, io.EOF
-	}
-	if p == nil {
-		return 0, ErrNilBuf
 	}
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	for n < len(p) {
-		rn, err := r.message.Payload.Read(p[n:])
-		n += rn
-		if err == io.EOF {
-			r.eof = true
-			if n == 0 {
-				return 0, io.EOF
-			}
-			return n, nil
-		} else if err != nil {
-			return n, err
+	if r.remaining == 0 {
+		opcode, err := r.conn.acceptFrame()
+		if err != nil {
+			return 0, fatal(err)
+		}
+		if opcode != OpcodeContinuation {
+			r.conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
+			return 0, fatal(ErrInvalidOPCODE)
 		}
 	}
 
-	return n, nil
-}
+	for {
+		if r.remaining == 0 && r.fin {
+			return n, io.EOF
+		} else if r.remaining == 0 {
+			return n, nil
+		}
+		if n == len(p) {
+			return n, nil
+		}
 
-func (r *ConnReader) Payload() []byte {
-	return r.message.Payload.Bytes()
+		toRead := min(len(p)-n, r.remaining)
+		rn, err := r.conn.readBuf.Read(p[n : n+toRead])
+		n += rn
+		r.remaining -= rn
+		if err == io.EOF {
+			// connection got closed
+			r.conn.CloseWithCode(CloseNormalClosure, "")
+			return n, fatal(ErrConnClosed)
+		}
+		if err != nil {
+			r.conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+			return n, fatal(err)
+		}
+
+		r.unMask(p[n-rn : n])
+	}
 }
 
 // ReadMessage reads the next complete WebSocket message into memory.
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
 // The context controls cancellation or timeout. If the connection is closed or the context expires,
 // it returns an appropriate error.
-func (conn *Conn) ReadMessage(ctx context.Context) (msgType int8, data []byte, err error) {
+func (conn *Conn) ReadMessage() (msgType int8, data []byte, err error) {
 	if conn.isClosed.Load() {
 		return -1, nil, fatal(ErrConnClosed)
 	}
-	if ctx == nil {
-		ctx = context.TODO()
-	}
 
-	reader, msgType, err := conn.NextReader(ctx)
+	reader, msgType, err := conn.NextReader()
 	if err != nil {
 		return -1, nil, err
 	}
 
-	return msgType, reader.Payload(), nil
+	data, err = io.ReadAll(reader)
+	if err != nil {
+		return -1, nil, err
+	}
+
+	return msgType, data, nil
 }
 
 // ReadBinary returns the binary payload from a WebSocket binary message.
@@ -280,8 +215,8 @@ func (conn *Conn) ReadMessage(ctx context.Context) (msgType int8, data []byte, e
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn) ReadBinary(ctx context.Context) (data []byte, err error) {
-	msgType, payload, err := conn.ReadMessage(ctx)
+func (conn *Conn) ReadBinary() (data []byte, err error) {
+	msgType, payload, err := conn.ReadMessage()
 	if err != nil {
 		return nil, err
 	} else if msgType != OpcodeBinary {
@@ -298,8 +233,8 @@ func (conn *Conn) ReadBinary(ctx context.Context) (data []byte, err error) {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn) ReadString(ctx context.Context) ([]byte, error) {
-	msgType, payload, err := conn.ReadMessage(ctx)
+func (conn *Conn) ReadString() ([]byte, error) {
+	msgType, payload, err := conn.ReadMessage()
 	if err != nil {
 		return nil, err // Connection already close by acceptMessage()
 	} else if msgType != OpcodeText {
@@ -318,8 +253,8 @@ func (conn *Conn) ReadString(ctx context.Context) ([]byte, error) {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn) ReadJSON(ctx context.Context, v any) error {
-	reader, msgType, err := conn.NextReader(ctx)
+func (conn *Conn) ReadJSON(v any) error {
+	reader, msgType, err := conn.NextReader()
 	if err != nil {
 		return err
 	}

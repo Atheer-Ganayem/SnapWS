@@ -76,9 +76,13 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	var info FileInfo
-	if err := conn.ReadJSON(context.TODO(), &info); err != nil || info.Name == "" || info.Size == 0 {
+	if err := conn.ReadJSON(&info); err != nil || info.Name == "" || info.Size == 0 {
 		return
 	}
+
+	// ##############
+	// not woriking
+	// ##############33333
 
 	file, err := os.Create("cmd/examples/file-streaming/" + info.Name)
 	if err != nil {
@@ -86,7 +90,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	reader, msgType, err := conn.NextReader(context.TODO())
+	reader, msgType, err := conn.NextReader()
 	if err != nil || msgType != snapws.OpcodeBinary {
 		return
 	}
