@@ -22,8 +22,10 @@ type ConnReader struct {
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
-// Returns a websocket frame, uint16 representing close reason (if error), and an error.
-// Use higher-level methods like AcceptString, AcceptJSON, or AcceptBytes for convenience.
+// If the frame is a data frame it returns its opcode and an error. if the frame if a control frame,
+// it handles it and keeps reading till it reads a data frame.
+// Note: it resets the conn.reader if it reads a valid control frame,
+// because of that, you should only call it when you are ready to reset it.
 func (conn *Conn) acceptFrame() (int8, error) {
 	for {
 		b, err := conn.nRead(2)
@@ -101,8 +103,7 @@ func (conn *Conn) acceptFrame() (int8, error) {
 			continue
 		}
 
-		//#######################
-
+		// reseting conn.reader
 		conn.reader.fin = fin
 		conn.reader.remaining = n
 		conn.reader.maskPos = 0
@@ -111,12 +112,12 @@ func (conn *Conn) acceptFrame() (int8, error) {
 	}
 }
 
-// NextReader returns an io.Reader for the next complete WebSocket message.
-// It blocks until a full message is available or the context is canceled.
+// NextReader returns an io.Reader for the next WebSocket message.
+// It blocks until a data frame is available.
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
-// If the connection is closed or the context expires, it returns a non-nil error.
-func (conn *Conn) NextReader() (*ConnReader, int8, error) {
+// All errors return are of type snap.FatalError indicating that the error is fatal and the connection got closed.
+func (conn *Conn) NextReader() (io.Reader, int8, error) {
 	if conn.isClosed.Load() {
 		return nil, -1, fatal(ErrConnClosed)
 	}
@@ -135,19 +136,23 @@ func (conn *Conn) NextReader() (*ConnReader, int8, error) {
 	return &conn.reader, opcode, nil
 }
 
-// Read reads data from the current frame group (message) into the provided byte slice `p`.
-// It reads sequentially across multiple frames if needed, until `p` is full or EOF is reached.
-// Returns the number of bytes read and any error encountered.
-// When all frames are fully consumed, it returns io.EOF.
+// Read implements the io.Reader interface for ConnReader.
+// It reads WebSocket message payload data into p, handling continuation frames,
+// unmasking (if required), and connection closure. This function allows the
+// application to stream data frame-by-frame.
+//
+// Behavior:
+//   - Returns io.EOF when the final frame of a message has been fully read.
+//   - If additional frames are part of the same message (continuation frames),
+//     it will transparently fetch and continue reading them.
+//   - If a fatal error occurs (protocol violation, closed connection, etc.),
+//     the connection will be closed and a fatal error will be returned.
 func (r *ConnReader) Read(p []byte) (n int, err error) {
-	if r.remaining == 0 && r.fin {
-		return 0, io.EOF
-	}
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	if r.remaining == 0 {
+	if r.remaining == 0 && !r.fin {
 		opcode, err := r.conn.acceptFrame()
 		if err != nil {
 			return 0, fatal(err)

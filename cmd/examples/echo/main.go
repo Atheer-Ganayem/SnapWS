@@ -4,18 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
 var upgrader *snapws.Upgrader
-var ctx = context.TODO()
 
 func main() {
-	upgrader = snapws.NewUpgrader(&snapws.Options{
-		PingEvery: time.Second,
-	})
+	upgrader = snapws.NewUpgrader(nil)
 
 	http.HandleFunc("/", handler)
 
@@ -31,7 +27,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		_, data, err := conn.ReadMessage()
+		data, err := conn.ReadString()
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -39,7 +35,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendBytes(ctx, data)
+		err = conn.SendString(context.TODO(), data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {

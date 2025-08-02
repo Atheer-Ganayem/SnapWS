@@ -52,6 +52,8 @@ type ManagedConn[KeyType comparable] struct {
 	Manager *Manager[KeyType]
 }
 
+// Used to write control frames.
+// This is needed because control frames can be written mid data frames.
 type ControlWriter struct {
 	conn *Conn
 	buf  []byte
@@ -104,6 +106,8 @@ func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[
 	return &ManagedConn[KeyType]{Conn: conn, Key: key, Manager: m}
 }
 
+// Peek n this discards n from the reader.
+// Used to simplify code.
 func (conn *Conn) nRead(n int) ([]byte, error) {
 	b, err := conn.readBuf.Peek(n)
 	if err != nil {
