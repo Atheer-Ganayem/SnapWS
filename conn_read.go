@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"math"
 	"time"
 )
 
@@ -14,11 +15,16 @@ import (
 //     at a time. Concurrent reads on the same connection or the same
 //     ConnReader are not supported.
 type ConnReader struct {
-	conn      *Conn
+	conn *Conn
+	// current frame info
 	fin       bool
+	isMasked  bool
 	maskKey   [4]byte
 	maskPos   int
 	remaining int
+	// total size of all message's frames so far
+	totalSize int
+	fragments int
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
@@ -31,7 +37,7 @@ func (conn *Conn) acceptFrame() (int8, error) {
 		b, err := conn.nRead(2)
 		if err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-			return -1, err
+			return -1, fatal(err)
 		}
 
 		fin := b[0]&0b10000000 == 128
@@ -46,7 +52,7 @@ func (conn *Conn) acceptFrame() (int8, error) {
 			conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 			return -1, ErrInvalidOPCODE
 		}
-		if rsv1+rsv2+rsv3 != 0 {
+		if (rsv1 | rsv2 | rsv3) != 0 {
 			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
 			return -1, ErrReceivedReservedBits
 		}
@@ -63,7 +69,12 @@ func (conn *Conn) acceptFrame() (int8, error) {
 				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 				return -1, err
 			}
-			n = int(binary.BigEndian.Uint64(b))
+			n64 := binary.BigEndian.Uint64(b)
+			if n64 > math.MaxInt {
+				conn.CloseWithCode(CloseMessageTooBig, ErrTooLargePayload.Error())
+				return -1, ErrTooLargePayload
+			}
+			n = int(n64)
 		case 126:
 			b, err := conn.nRead(2)
 			if err != nil {
@@ -73,6 +84,11 @@ func (conn *Conn) acceptFrame() (int8, error) {
 			n = int(binary.BigEndian.Uint16(b))
 		default:
 			n = int(lengthB)
+		}
+
+		if n > conn.upgrader.MaxMessageSize {
+			conn.CloseWithCode(CloseMessageTooBig, ErrTooLargePayload.Error())
+			return -1, ErrTooLargePayload
 		}
 
 		if isMasked {
@@ -94,10 +110,11 @@ func (conn *Conn) acceptFrame() (int8, error) {
 				conn.CloseWithPayload(n)
 				return -1, fatal(ErrConnClosed)
 			case OpcodePing:
-				conn.Pong(nil)
+				conn.pong(n)
 			case OpcodePong:
 				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-					conn.CloseWithCode(CloseProtocolError, "time out")
+					conn.CloseWithCode(CloseInternalServerErr, "timeout")
+					return -1, fatal(ErrConnClosed)
 				}
 			}
 			continue
@@ -107,6 +124,8 @@ func (conn *Conn) acceptFrame() (int8, error) {
 		conn.reader.fin = fin
 		conn.reader.remaining = n
 		conn.reader.maskPos = 0
+		conn.reader.isMasked = isMasked
+		conn.reader.fragments++
 
 		return int8(opcode), nil
 	}
@@ -128,10 +147,13 @@ func (conn *Conn) NextReader() (io.Reader, int8, error) {
 		return nil, 0, fatal(err)
 	}
 
+	conn.reader.fragments = 0
 	opcode, err := conn.acceptFrame()
 	if err != nil {
 		return nil, -1, fatal(err)
 	}
+
+	conn.reader.totalSize = conn.reader.remaining
 
 	return &conn.reader, opcode, nil
 }
@@ -161,6 +183,16 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 			r.conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 			return 0, fatal(ErrInvalidOPCODE)
 		}
+		r.totalSize += r.remaining
+		if r.totalSize > r.conn.upgrader.MaxMessageSize {
+			r.conn.CloseWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
+			return 0, fatal(ErrMessageTooLarge)
+		}
+	}
+
+	if r.conn.upgrader.ReaderMaxFragments > 0 && r.fragments > r.conn.upgrader.ReaderMaxFragments {
+		r.conn.CloseWithCode(ClosePolicyViolation, ErrTooMuchFragments.Error())
+		return 0, fatal(ErrTooMuchFragments)
 	}
 
 	for {
@@ -187,7 +219,9 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 			return n, fatal(err)
 		}
 
-		r.unMask(p[n-rn : n])
+		if r.isMasked {
+			r.unMask(p[n-rn : n])
+		}
 	}
 }
 

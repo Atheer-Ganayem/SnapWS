@@ -9,9 +9,12 @@ import (
 )
 
 var upgrader *snapws.Upgrader
+var ctx = context.Background()
 
 func main() {
-	upgrader = snapws.NewUpgrader(nil)
+	upgrader = snapws.NewUpgrader(&snapws.Options{
+		PoolWriteBuffers: true,
+	})
 
 	http.HandleFunc("/", handler)
 
@@ -27,7 +30,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		data, err := conn.ReadString()
+		_, data, err := conn.ReadMessage()
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -35,7 +38,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendString(context.TODO(), data)
+		err = conn.SendBytes(ctx, data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {

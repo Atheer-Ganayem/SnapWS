@@ -21,11 +21,6 @@ const (
 	DefaultMaxMessageSize  = 1 << 20 // 1MB
 	DefaultReadBufferSize  = 4096
 	DefaultWriteBufferSize = 4096
-
-	DefaultInboundFrames   = 32
-	DefaultInboundMessages = 8
-
-	DefaultOutboundControl = 4
 )
 
 type Options struct {
@@ -59,16 +54,6 @@ type Options struct {
 	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
 	// but may increase latency in some scenarios. Disabled by default.
 	PoolWriteBuffers bool
-	// Disabled by default.
-	PoolFrames bool
-
-	// the size of iboundFrames chan buffer, if not set it will default to 32
-	// Note: if the consumer is too slow and the channel gets full, the connection will be droped.
-	InboundFramesSize int
-	// the size of iboundMessages chan buffer, if not set it will default to 8
-	InboundMessagesSize int
-	// the size of outboundControl chan buffer, if not set it will default to 4
-	OutboundControlSize int
 
 	// subProtocols defines the list of supported WebSocket sub-protocols by the server.
 	// During the handshake, the server will select the first matching protocol from the
@@ -113,16 +98,6 @@ func (opt *Options) WithDefault() {
 	}
 	if opt.WriteBufferSize == 0 {
 		opt.WriteBufferSize = DefaultWriteBufferSize
-	}
-
-	if opt.InboundFramesSize == 0 {
-		opt.InboundFramesSize = DefaultInboundFrames
-	}
-	if opt.InboundMessagesSize == 0 {
-		opt.InboundMessagesSize = DefaultInboundMessages
-	}
-	if opt.OutboundControlSize == 0 {
-		opt.OutboundControlSize = DefaultOutboundControl
 	}
 
 	if !opt.BackpressureStrategy.Valid() {

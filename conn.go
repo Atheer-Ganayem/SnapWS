@@ -2,7 +2,6 @@ package snapws
 
 import (
 	"bufio"
-	"context"
 	"encoding/binary"
 	"net"
 	"sync"
@@ -40,7 +39,7 @@ type Conn struct {
 
 	readBuf *bufio.Reader
 
-	ControlWriter *ControlWriter
+	controlWriter *ControlWriter
 }
 
 // ManagedConn is a Conn that is tracked by a Manager.
@@ -60,16 +59,19 @@ type ControlWriter struct {
 	sig  chan struct{}
 	err  chan error
 	lock chan struct{} // full = locked
+	t    *time.Timer
 }
 
 func (conn *Conn) NewControlWriter() *ControlWriter {
-	return &ControlWriter{
+	cw := &ControlWriter{
 		conn: conn,
 		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
 		sig:  make(chan struct{}),
 		err:  make(chan error),
 		lock: make(chan struct{}, 1),
 	}
+
+	return cw
 }
 
 func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Conn {
@@ -79,7 +81,6 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 		upgrader:    u,
 		SubProtocol: subProtocol,
 		done:        make(chan struct{}),
-		ticker:      time.NewTicker(u.PingEvery),
 	}
 
 	size := u.ReadBufferSize
@@ -94,7 +95,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 
 	conn.reader = ConnReader{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText)
-	conn.ControlWriter = conn.NewControlWriter()
+	conn.controlWriter = conn.NewControlWriter()
 
 	go conn.listen()
 	go conn.pingLoop()
@@ -106,80 +107,38 @@ func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[
 	return &ManagedConn[KeyType]{Conn: conn, Key: key, Manager: m}
 }
 
-// Peek n this discards n from the reader.
-// Used to simplify code.
-func (conn *Conn) nRead(n int) ([]byte, error) {
-	b, err := conn.readBuf.Peek(n)
-	if err != nil {
-		return nil, err
-	}
-
-	// never fails
-	_, _ = conn.readBuf.Discard(n)
-
-	return b, nil
-}
-
-// Locks "wLock" indicating that a writer has been intiated.
-// It tires to aquire the lock, if the provided context is done before
-// succeeding to aquiring the lock, it return an error.
-func (conn *Conn) lockW(ctx context.Context) error {
-	select {
-	case <-conn.done:
-		return fatal(ErrConnClosed)
-	case conn.writer.lock <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// Unlocks "wLock", indicating that the writer has finished.
-// Returns a snapws.FatalError if the connection is closed.
-// Returns nil if unlocking succeeds or if it was already unlocked.
-func (conn *Conn) unlockW() error {
-	select {
-	case _, ok := <-conn.writer.lock:
-		if !ok {
-			return fatal(ErrChannelClosed)
-		}
-		return nil
-	default:
-		// already unlocked
-		return nil
-	}
-}
-
 // A loop that runs as long as the connection is alive.
 // Listens for outgoing frames.
 // It gives priotiry to control frames.
 func (conn *Conn) listen() {
 	for {
 		select {
-		case _, ok := <-conn.ControlWriter.sig:
+		case _, ok := <-conn.controlWriter.sig:
 			if !ok {
-				conn.ControlWriter.err <- fatal(ErrChannelClosed)
+				conn.controlWriter.err <- fatal(ErrChannelClosed)
 				return
 			}
-
-			err := conn.sendFrame(conn.ControlWriter.buf)
-			conn.ControlWriter.err <- err
+			conn.controlWriter.err <- conn.sendFrame(conn.controlWriter.buf)
 
 		case _, ok := <-conn.writer.sig:
 			if !ok {
 				if conn.writer != nil {
-					trySendErr(conn.writer.errCh, fatal(ErrChannelClosed))
+					conn.writer.sendErr(fatal(ErrChannelClosed))
 				}
 				return
 			}
 
 			select {
 			case <-conn.writer.ctx.Done():
-				trySendErr(conn.writer.errCh, conn.writer.ctx.Err())
+				conn.writer.sendErr(conn.writer.ctx.Err())
 			default:
-				err := conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used])
+				err := conn.raw.SetWriteDeadline(time.Now().Add(conn.upgrader.WriteWait))
+				err = fatal(err)
+				if err == nil {
+					err = conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used])
+				}
 				if conn.writer.ctx.Err() == nil {
-					trySendErr(conn.writer.errCh, err)
+					conn.writer.sendErr(err)
 				}
 			}
 		}
@@ -190,33 +149,32 @@ func (conn *Conn) listen() {
 // Ping the client every "PingEvery" provided from the manager.
 // If pinging fails the connection closes.
 func (conn *Conn) pingLoop() {
+	if conn.ticker == nil {
+		conn.ticker = time.NewTicker(conn.upgrader.PingEvery)
+	}
 	for range conn.ticker.C {
-		err := conn.Ping()
-		if err != nil {
+		if err := conn.Ping(); err != nil {
 			conn.CloseWithCode(ClosePolicyViolation, err.Error())
 			return
 		}
 	}
-
 }
 
 // CloseWithCode closes the connection with the given code and reason.
 func (conn *Conn) CloseWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
-		close(conn.done)
-
-		if !conn.isClosed.Load() {
-			_ = conn.writeClose(code, reason)
-		}
-
-		conn.writer.Close()
-		conn.raw.Close()
-		conn.isClosed.Store(true)
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
+		conn.writer.Close() // writer needs conn.done to work properly
+		close(conn.done)
+		conn.isClosed.Store(true)
+
+		conn.controlWriter.writeClose(code, reason)
+
 		close(conn.writer.sig)
 		close(conn.writer.lock)
+		// close(conn.controlWriter.sig)
 
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)

@@ -66,7 +66,16 @@ func (w *ConnWriter) writeHeaders(FIN bool, OPCODE uint8) error {
 }
 
 func isValidCloseCode(code uint16) bool {
-	return slices.Contains(allowedCodes, code)
+	if slices.Contains(allowedCodes, code) {
+		return true
+	}
+
+	// private close codes
+	if code >= 3000 && code <= 4999 {
+		return true
+	}
+
+	return false
 }
 
 func isVaidOpcode(opcode byte) bool {
