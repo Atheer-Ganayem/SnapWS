@@ -31,10 +31,12 @@ type Conn struct {
 	isClosed  atomic.Bool
 	closeOnce sync.Once
 
-	// ticker for ping loop
-	ticker *time.Ticker
+	// for ping loop
+	ticker      *time.Ticker
+	pingSent    atomic.Bool
+	pingPayload []byte
 
-	reader ConnReader
+	reader *ConnReader
 	writer *ConnWriter
 
 	readBuf *bufio.Reader
@@ -57,11 +59,12 @@ type ManagedConn[KeyType comparable] struct {
 // Used to write control frames.
 // This is needed because control frames can be written mid data frames.
 type ControlWriter struct {
-	conn *Conn
-	buf  []byte
-	err  chan error
-	lock *mu
-	t    *time.Timer
+	conn    *Conn
+	buf     []byte
+	maskKey [4]byte
+	err     chan error
+	lock    *mu
+	t       *time.Timer
 }
 
 func (conn *Conn) NewControlWriter() *ControlWriter {
@@ -82,6 +85,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 		upgrader:    u,
 		SubProtocol: subProtocol,
 		done:        make(chan struct{}),
+		pingPayload: make([]byte, 0, MaxControlFramePayload),
 	}
 	conn.writeLock = newMu(conn)
 
@@ -95,7 +99,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
 	}
 
-	conn.reader = ConnReader{conn: conn}
+	conn.reader = &ConnReader{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText)
 	conn.controlWriter = conn.NewControlWriter()
 
@@ -120,6 +124,7 @@ func (conn *Conn) pingLoop() {
 			conn.CloseWithCode(ClosePolicyViolation, err.Error())
 			return
 		}
+		conn.pingSent.Store(true)
 	}
 }
 
@@ -148,10 +153,22 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 // The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
 // The rest of the payload is optional, represnting a UTF-8 reason.
 // Any violations would cause a close with CloseProtocolError with the apropiate reason.
-func (conn *Conn) CloseWithPayload(n int) {
-	if n < 2 {
+func (conn *Conn) CloseWithPayload(n int, isMasked bool) {
+	if n == 0 {
+		conn.CloseWithCode(CloseNormalClosure, "")
+		return
+	} else if n == 1 {
 		conn.CloseWithCode(CloseProtocolError, "invalid close frame payload")
 		return
+	}
+
+	if isMasked {
+		b, err := conn.nRead(4)
+		if err != nil {
+			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+			return
+		}
+		copy(conn.controlWriter.maskKey[:], b)
 	}
 
 	payload, err := conn.nRead(n)
@@ -159,6 +176,8 @@ func (conn *Conn) CloseWithPayload(n int) {
 		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 		return
 	}
+
+	conn.controlWriter.unMask(payload)
 
 	code := binary.BigEndian.Uint16(payload[:2])
 	if !isValidCloseCode(code) {
@@ -187,8 +206,8 @@ func (conn *ManagedConn[KeyType]) CloseWithCode(code uint16, reason string) {
 	conn.Conn.CloseWithCode(code, reason)
 	conn.Manager.unregister(conn.Key)
 }
-func (conn *ManagedConn[KeyType]) CloseWithPayload(n int) {
-	conn.Conn.CloseWithPayload(n)
+func (conn *ManagedConn[KeyType]) CloseWithPayload(n int, isMasked bool) {
+	conn.Conn.CloseWithPayload(n, isMasked)
 	conn.Manager.unregister(conn.Key)
 }
 

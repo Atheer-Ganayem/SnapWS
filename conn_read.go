@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"time"
+	"unicode/utf8"
 )
 
 // ConnReader provides an io.Reader for a single WebSocket message.
@@ -16,15 +17,15 @@ import (
 //     ConnReader are not supported.
 type ConnReader struct {
 	conn *Conn
+	// message info
+	totalSize int
+	fragments int
 	// current frame info
 	fin       bool
 	isMasked  bool
 	maskKey   [4]byte
 	maskPos   int
 	remaining int
-	// total size of all message's frames so far
-	totalSize int
-	fragments int
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
@@ -91,30 +92,38 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, ErrTooLargePayload
 		}
 
-		if isMasked {
-			b, err := conn.nRead(4)
-			if err != nil {
-				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return nilOpcode, err
-			}
-			copy(conn.reader.maskKey[:], b)
-		}
-
 		if isControl(opcode) {
-			if n > 125 {
+			if !fin || n > MaxControlFramePayload {
 				conn.CloseWithCode(CloseProtocolError, ErrInvalidControlFrame.Error())
 				return nilOpcode, ErrInvalidControlFrame
 			}
 			switch opcode {
-			case OpcodeClose: // TODO: i have to close with the payload
-				conn.CloseWithPayload(n)
+			case OpcodeClose:
+				conn.CloseWithPayload(n, isMasked)
 				return nilOpcode, fatal(ErrConnClosed)
 			case OpcodePing:
-				conn.pong(n)
+				conn.pong(n, isMasked)
 			case OpcodePong:
-				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-					conn.CloseWithCode(CloseInternalServerErr, "timeout")
-					return nilOpcode, fatal(ErrConnClosed)
+				if conn.pingSent.Load() {
+					p, err := conn.nRead(n)
+					if err != nil {
+						conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+						return nilOpcode, err
+					}
+					if ok := comparePayload(conn.pingPayload[:], p); !ok {
+						conn.CloseWithCode(CloseProtocolError, "ping/pong payload mismatch")
+						return nilOpcode, fatal(ErrConnClosed)
+					}
+					if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
+						conn.CloseWithCode(CloseInternalServerErr, "timeout")
+						return nilOpcode, fatal(ErrConnClosed)
+					}
+					conn.pingSent.Store(false)
+				} else {
+					if _, err := conn.readBuf.Discard(4 + n); err != nil {
+						conn.CloseWithCode(CloseInternalServerErr, "something went wrong")
+						return nilOpcode, fatal(ErrConnClosed)
+					}
 				}
 			}
 			continue
@@ -126,6 +135,14 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 		conn.reader.maskPos = 0
 		conn.reader.isMasked = isMasked
 		conn.reader.fragments++
+		if isMasked {
+			b, err := conn.nRead(4)
+			if err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return nilOpcode, err
+			}
+			copy(conn.reader.maskKey[:], b)
+		}
 
 		return opcode, nil
 	}
@@ -143,19 +160,24 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 
 	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
 	if err != nil {
-		conn.CloseWithCode(CloseProtocolError, "timeout")
+		conn.CloseWithCode(CloseInternalServerErr, "timeout")
 		return nil, 0, fatal(err)
 	}
 
-	conn.reader.fragments = 0
 	opcode, err := conn.acceptFrame()
 	if err != nil {
 		return nil, 0, fatal(err)
 	}
 
+	if !isData(opcode) {
+		conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
+		return nil, 0, fatal(ErrInvalidOPCODE)
+	}
+
+	conn.reader.fragments = 0
 	conn.reader.totalSize = conn.reader.remaining
 
-	return &conn.reader, opcode, nil
+	return conn.reader, opcode, nil
 }
 
 // Read implements the io.Reader interface for ConnReader.
@@ -242,6 +264,13 @@ func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 	data, err = io.ReadAll(reader)
 	if err != nil {
 		return nilOpcode, nil, err
+	}
+
+	if msgType == OpcodeText {
+		if ok := utf8.Valid(data); !ok {
+			conn.CloseWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
+			return nilOpcode, nil, fatal(ErrInvalidUTF8)
+		}
 	}
 
 	return msgType, data, nil

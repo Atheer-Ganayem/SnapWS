@@ -69,3 +69,15 @@ func (conn *Conn) nRead(n int) ([]byte, error) {
 
 	return b, nil
 }
+
+func comparePayload(p1 []byte, p2 []byte) bool {
+	if len(p1) != len(p2) {
+		return false
+	}
+	for i := range p1 {
+		if p1[i] != p2[i] {
+			return false
+		}
+	}
+	return true
+}

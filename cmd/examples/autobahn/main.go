@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -11,7 +10,9 @@ import (
 var upgrader *snapws.Upgrader
 
 func main() {
-	upgrader = snapws.NewUpgrader(nil)
+	upgrader = snapws.NewUpgrader(&snapws.Options{
+		MaxMessageSize: snapws.DefaultMaxMessageSize * 16,
+	})
 
 	http.HandleFunc("/", handler)
 
@@ -35,7 +36,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendMessage(context.TODO(), t, data)
+		err = conn.SendMessage(nil, t, data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {

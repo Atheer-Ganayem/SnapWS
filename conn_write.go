@@ -181,10 +181,6 @@ func (conn *Conn) sendFrame(buf []byte) error {
 }
 
 func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error {
-	if len(b) == 0 {
-		return ErrEmptyPayload
-	}
-
 	if !isData(opcode) {
 		return ErrInvalidOPCODE
 	}
@@ -275,11 +271,11 @@ func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 		return
 	}
 
-	cw.buf = cw.buf[:2]
+	cw.buf = cw.buf[:4]
 	cw.buf[0] = 0x80 + OpcodeClose
 	cw.buf[1] = 2
-	binary.BigEndian.AppendUint16(cw.buf, closeCode)
-	if len(reason) <= MaxControlFramePayload-2 {
+	binary.BigEndian.PutUint16(cw.buf[2:4], closeCode)
+	if len(reason) > 0 && len(reason) <= MaxControlFramePayload-2 {
 		cw.buf[1] += byte(len(reason))
 		cw.buf = append(cw.buf, reason...)
 	}
@@ -292,21 +288,21 @@ func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
 func (conn *Conn) Ping() error {
-	return conn.controlWriter.writeControl(OpcodePing, 0)
+	return conn.controlWriter.writeControl(OpcodePing, 0, false)
 }
 
 // pong sends a pong control frame in response to a ping.
 // Automatically closes the connection on failure.
 // Ping\pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-func (conn *Conn) pong(n int) {
-	err := conn.controlWriter.writeControl(OpcodePong, n)
+func (conn *Conn) pong(n int, isMasked bool) {
+	err := conn.controlWriter.writeControl(OpcodePong, n, isMasked)
 	if IsFatalErr(err) {
 		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 	}
 }
 
-func (cw *ControlWriter) writeControl(opcode byte, n int) error {
+func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if cw.t == nil {
 		cw.t = time.NewTimer(cw.conn.upgrader.WriteWait)
 	} else {
@@ -328,12 +324,22 @@ func (cw *ControlWriter) writeControl(opcode byte, n int) error {
 	// write header and payload
 	cw.buf = cw.buf[:2]
 	cw.buf[0] = 0x80 + opcode
+
+	if isMasked {
+		b, err := cw.conn.nRead(4)
+		if err != nil {
+			return fatal(ErrInternalServer)
+		}
+		copy(cw.maskKey[:], b)
+	}
 	if n > 0 && n <= MaxControlFramePayload {
 		payload, err := cw.conn.nRead(n)
 		if err != nil {
 			return fatal(ErrConnClosed)
 		}
 		cw.buf[1] = byte(n)
+
+		cw.unMask(payload)
 		cw.buf = append(cw.buf, payload...)
 	}
 
