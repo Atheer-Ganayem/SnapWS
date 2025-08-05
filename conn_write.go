@@ -295,13 +295,17 @@ func (conn *Conn) Ping() error {
 // Automatically closes the connection on failure.
 // Ping\pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-func (conn *Conn) pong(n int, isMasked bool) {
+// all errors returned are fatal because it returns writeControl returned error.
+func (conn *Conn) pong(n int, isMasked bool) error {
 	err := conn.controlWriter.writeControl(OpcodePong, n, isMasked)
 	if IsFatalErr(err) {
 		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 	}
+	return err
 }
 
+// write control frame.
+// all errors returned are fatal
 func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if cw.t == nil {
 		cw.t = time.NewTimer(cw.conn.upgrader.WriteWait)

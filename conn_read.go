@@ -102,7 +102,9 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 				conn.handleClose(n, isMasked)
 				return nilOpcode, fatal(ErrConnClosed)
 			case OpcodePing:
-				conn.pong(n, isMasked)
+				if err := conn.pong(n, isMasked); err != nil {
+					return 0, err
+				}
 			case OpcodePong:
 				if err = conn.handlePong(n, isMasked); err != nil {
 					return 0, err
