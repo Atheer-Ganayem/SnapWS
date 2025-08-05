@@ -14,8 +14,6 @@ import (
 // It owns the underlying network connection and manages
 // reading/writing frames, assembling messages, handling control
 // frames (ping/pong/close), and lifecycle state.
-//
-// Reader and Writer aren't safe to use from multiple Go routines.
 type Conn struct {
 	raw net.Conn
 	// curently this is a server library, this is saved for future use
@@ -30,6 +28,7 @@ type Conn struct {
 	done      chan struct{}
 	isClosed  atomic.Bool
 	closeOnce sync.Once
+	onClose   func()
 
 	// for ping loop
 	ticker      *time.Ticker
@@ -45,37 +44,6 @@ type Conn struct {
 
 	/// testing
 	writeLock *mu
-}
-
-// ManagedConn is a Conn that is tracked by a Manager.
-// It links a connection to a unique key so that the Manager
-// can manage it safely (fetch/add/remove).
-type ManagedConn[KeyType comparable] struct {
-	*Conn
-	Key     KeyType
-	Manager *Manager[KeyType]
-}
-
-// Used to write control frames.
-// This is needed because control frames can be written mid data frames.
-type ControlWriter struct {
-	conn    *Conn
-	buf     []byte
-	maskKey [4]byte
-	err     chan error
-	lock    *mu
-	t       *time.Timer
-}
-
-func (conn *Conn) NewControlWriter() *ControlWriter {
-	cw := &ControlWriter{
-		conn: conn,
-		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
-		err:  make(chan error),
-		lock: newMu(conn),
-	}
-
-	return cw
 }
 
 func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Conn {
@@ -101,15 +69,49 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 
 	conn.reader = &ConnReader{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText)
-	conn.controlWriter = conn.NewControlWriter()
+	conn.controlWriter = conn.newControlWriter()
 
 	go conn.pingLoop()
 
 	return conn
 }
 
+// ManagedConn is a Conn that is tracked by a Manager.
+// It links a connection to a unique key so that the Manager
+// can manage it safely (fetch/add/remove).
+type ManagedConn[KeyType comparable] struct {
+	*Conn
+	Key     KeyType
+	Manager *Manager[KeyType]
+}
+
 func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[KeyType] {
+	conn.onClose = func() {
+		m.unregister(key)
+	}
 	return &ManagedConn[KeyType]{Conn: conn, Key: key, Manager: m}
+}
+
+// Used to write control frames.
+// This is needed because control frames can be written mid data frames.
+type ControlWriter struct {
+	conn    *Conn
+	buf     []byte
+	maskKey [4]byte
+	err     chan error
+	lock    *mu
+	t       *time.Timer
+}
+
+func (conn *Conn) newControlWriter() *ControlWriter {
+	cw := &ControlWriter{
+		conn: conn,
+		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
+		err:  make(chan error),
+		lock: newMu(conn),
+	}
+
+	return cw
 }
 
 // A loop that runs as long as the connection is alive.
@@ -128,6 +130,46 @@ func (conn *Conn) pingLoop() {
 	}
 }
 
+// used to handle pong when sent from the client.
+// called by acceptFrame() (in conn_read.go).
+// returns an error, if the error is fatal it closes the connection.
+func (conn *Conn) handlePong(n int, isMasked bool) error {
+	if conn.pingSent.Load() {
+		if isMasked {
+			b, err := conn.nRead(4)
+			if err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return err
+			}
+			copy(conn.controlWriter.maskKey[:], b)
+		}
+
+		p, err := conn.nRead(n)
+		if err != nil {
+			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+			return fatal(err)
+		}
+
+		conn.controlWriter.unMask(p)
+		if ok := comparePayload(conn.pingPayload[:], p); !ok {
+			conn.CloseWithCode(CloseProtocolError, "ping/pong payload mismatch")
+			return fatal(ErrConnClosed)
+		}
+		if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
+			conn.CloseWithCode(CloseInternalServerErr, "timeout")
+			return fatal(ErrConnClosed)
+		}
+		conn.pingSent.Store(false)
+	} else {
+		if _, err := conn.readBuf.Discard(4 + n); err != nil {
+			conn.CloseWithCode(CloseInternalServerErr, "something went wrong")
+			return fatal(ErrConnClosed)
+		}
+	}
+
+	return nil
+}
+
 // CloseWithCode closes the connection with the given code and reason.
 func (conn *Conn) CloseWithCode(code uint16, reason string) {
 	conn.closeOnce.Do(func() {
@@ -142,6 +184,9 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
+		if conn.onClose != nil {
+			conn.onClose()
+		}
 
 		if !conn.upgrader.DisableWriteBuffersPooling {
 			conn.upgrader.WritePool.Put(&conn.writer.buf)
@@ -153,7 +198,11 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 // The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
 // The rest of the payload is optional, represnting a UTF-8 reason.
 // Any violations would cause a close with CloseProtocolError with the apropiate reason.
-func (conn *Conn) CloseWithPayload(n int, isMasked bool) {
+
+// This function is called upon receiving a close frame from the client.
+// It receives "n" representing the payload length, and "isMasked".
+// It parses the frame and calls CloseWithCode after extracting and validating the close code and reason.
+func (conn *Conn) handleClose(n int, isMasked bool) {
 	if n == 0 {
 		conn.CloseWithCode(CloseNormalClosure, "")
 		return
@@ -199,19 +248,4 @@ func (conn *Conn) CloseWithPayload(n int, isMasked bool) {
 // Closes the conn normaly.
 func (conn *Conn) Close() {
 	conn.CloseWithCode(CloseNormalClosure, "Normal close")
-}
-
-// closers for ManagedConn.
-func (conn *ManagedConn[KeyType]) CloseWithCode(code uint16, reason string) {
-	conn.Conn.CloseWithCode(code, reason)
-	conn.Manager.unregister(conn.Key)
-}
-func (conn *ManagedConn[KeyType]) CloseWithPayload(n int, isMasked bool) {
-	conn.Conn.CloseWithPayload(n, isMasked)
-	conn.Manager.unregister(conn.Key)
-}
-
-func (conn *ManagedConn[KeyType]) Close() {
-	conn.Conn.Close()
-	conn.Manager.unregister(conn.Key)
 }

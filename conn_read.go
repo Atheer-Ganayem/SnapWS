@@ -99,31 +99,13 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			}
 			switch opcode {
 			case OpcodeClose:
-				conn.CloseWithPayload(n, isMasked)
+				conn.handleClose(n, isMasked)
 				return nilOpcode, fatal(ErrConnClosed)
 			case OpcodePing:
 				conn.pong(n, isMasked)
 			case OpcodePong:
-				if conn.pingSent.Load() {
-					p, err := conn.nRead(n)
-					if err != nil {
-						conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-						return nilOpcode, err
-					}
-					if ok := comparePayload(conn.pingPayload[:], p); !ok {
-						conn.CloseWithCode(CloseProtocolError, "ping/pong payload mismatch")
-						return nilOpcode, fatal(ErrConnClosed)
-					}
-					if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
-						conn.CloseWithCode(CloseInternalServerErr, "timeout")
-						return nilOpcode, fatal(ErrConnClosed)
-					}
-					conn.pingSent.Store(false)
-				} else {
-					if _, err := conn.readBuf.Discard(4 + n); err != nil {
-						conn.CloseWithCode(CloseInternalServerErr, "something went wrong")
-						return nilOpcode, fatal(ErrConnClosed)
-					}
+				if err = conn.handlePong(n, isMasked); err != nil {
+					return 0, err
 				}
 			}
 			continue
@@ -249,8 +231,6 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 
 // ReadMessage reads the next complete WebSocket message into memory.
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
-// The context controls cancellation or timeout. If the connection is closed or the context expires,
-// it returns an appropriate error.
 func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 	if conn.isClosed.Load() {
 		return nilOpcode, nil, fatal(ErrConnClosed)
@@ -268,7 +248,7 @@ func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 
 	if msgType == OpcodeText {
 		if ok := utf8.Valid(data); !ok {
-			conn.CloseWithCode(CloseProtocolError, ErrInvalidUTF8.Error())
+			conn.CloseWithCode(CloseInvalidFramePayloadData, ErrInvalidUTF8.Error())
 			return nilOpcode, nil, fatal(ErrInvalidUTF8)
 		}
 	}

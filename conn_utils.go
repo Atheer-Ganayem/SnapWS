@@ -1,6 +1,7 @@
 package snapws
 
 import (
+	"bytes"
 	"context"
 	"time"
 )
@@ -71,13 +72,5 @@ func (conn *Conn) nRead(n int) ([]byte, error) {
 }
 
 func comparePayload(p1 []byte, p2 []byte) bool {
-	if len(p1) != len(p2) {
-		return false
-	}
-	for i := range p1 {
-		if p1[i] != p2[i] {
-			return false
-		}
-	}
-	return true
+	return bytes.Equal(p1, p2)
 }

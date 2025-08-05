@@ -55,7 +55,7 @@ var upgrader *snapws.Upgrader
 func main() {
 	upgrader = snapws.NewUpgrader(nil)
 
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/echo", handler)
 
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
@@ -69,7 +69,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		data, err := conn.ReadString(context.TODO())
+		data, err := conn.ReadString()
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
