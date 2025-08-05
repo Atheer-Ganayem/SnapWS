@@ -180,20 +180,22 @@ func (conn *Conn) sendFrame(buf []byte) error {
 	return fatal(err)
 }
 
-// SendBytes sends the given byte slice as a WebSocket binary message.
-//
-// The payload must be non-empty. If not, the method returns snapws.ErrEmptyPayload.
-// The message will be split into fragments if needed based on WriteBufferSize.
-//
-// The returned error must be checked. If it's of type snapws.FatalError,
-// that indicates the connection was closed due to an I/O or protocol error.
-// Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn) SendBytes(ctx context.Context, b []byte) error {
+func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error {
 	if len(b) == 0 {
 		return ErrEmptyPayload
 	}
 
-	w, err := conn.NextWriter(ctx, OpcodeBinary)
+	if !isData(opcode) {
+		return ErrInvalidOPCODE
+	}
+
+	if opcode == OpcodeText {
+		if ok := utf8.Valid(b); !ok {
+			return ErrInvalidUTF8
+		}
+	}
+
+	w, err := conn.NextWriter(ctx, opcode)
 	if err != nil {
 		return err
 	}
@@ -206,6 +208,18 @@ func (conn *Conn) SendBytes(ctx context.Context, b []byte) error {
 	return w.Close()
 }
 
+// SendBytes sends the given byte slice as a WebSocket binary message.
+//
+// The payload must be non-empty. If not, the method returns snapws.ErrEmptyPayload.
+// The message will be split into fragments if needed based on WriteBufferSize.
+//
+// The returned error must be checked. If it's of type snapws.FatalError,
+// that indicates the connection was closed due to an I/O or protocol error.
+// Any other error means the connection is still open, and you may retry or continue using it.
+func (conn *Conn) SendBytes(ctx context.Context, p []byte) error {
+	return conn.SendMessage(ctx, OpcodeBinary, p)
+}
+
 // SendString sends the given string as a WebSocket text message.
 //
 // The string must be valid UTF-8 and non-empty. If it is not, the method returns
@@ -215,26 +229,8 @@ func (conn *Conn) SendBytes(ctx context.Context, b []byte) error {
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
-func (conn *Conn) SendString(ctx context.Context, data []byte) error {
-	if len(data) == 0 {
-		return ErrEmptyPayload
-	}
-
-	if ok := utf8.Valid(data); !ok {
-		return ErrInvalidUTF8
-	}
-
-	w, err := conn.NextWriter(ctx, OpcodeText)
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Write(data)
-	if err != nil {
-		return err
-	}
-
-	return w.Close()
+func (conn *Conn) SendString(ctx context.Context, p []byte) error {
+	return conn.SendMessage(ctx, OpcodeText, p)
 }
 
 // SendJSON sends the given value as a JSON-encoded WebSocket text message.
