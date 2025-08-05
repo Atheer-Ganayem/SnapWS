@@ -32,12 +32,12 @@ type ConnReader struct {
 // it handles it and keeps reading till it reads a data frame.
 // Note: it resets the conn.reader if it reads a valid control frame,
 // because of that, you should only call it when you are ready to reset it.
-func (conn *Conn) acceptFrame() (int8, error) {
+func (conn *Conn) acceptFrame() (uint8, error) {
 	for {
 		b, err := conn.nRead(2)
 		if err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-			return -1, fatal(err)
+			return nilOpcode, fatal(err)
 		}
 
 		fin := b[0]&0b10000000 == 128
@@ -50,15 +50,15 @@ func (conn *Conn) acceptFrame() (int8, error) {
 
 		if !isVaidOpcode(opcode) {
 			conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-			return -1, ErrInvalidOPCODE
+			return nilOpcode, ErrInvalidOPCODE
 		}
 		if (rsv1 | rsv2 | rsv3) != 0 {
 			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
-			return -1, ErrReceivedReservedBits
+			return nilOpcode, ErrReceivedReservedBits
 		}
 		if conn.isServer && !isMasked {
 			conn.CloseWithCode(CloseProtocolError, errExpectedMaskedFrame.Error())
-			return -1, errExpectedMaskedFrame
+			return nilOpcode, errExpectedMaskedFrame
 		}
 
 		n := 0
@@ -67,19 +67,19 @@ func (conn *Conn) acceptFrame() (int8, error) {
 			b, err := conn.nRead(8)
 			if err != nil {
 				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return -1, err
+				return nilOpcode, err
 			}
 			n64 := binary.BigEndian.Uint64(b)
 			if n64 > math.MaxInt {
 				conn.CloseWithCode(CloseMessageTooBig, ErrTooLargePayload.Error())
-				return -1, ErrTooLargePayload
+				return nilOpcode, ErrTooLargePayload
 			}
 			n = int(n64)
 		case 126:
 			b, err := conn.nRead(2)
 			if err != nil {
 				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return -1, err
+				return nilOpcode, err
 			}
 			n = int(binary.BigEndian.Uint16(b))
 		default:
@@ -88,14 +88,14 @@ func (conn *Conn) acceptFrame() (int8, error) {
 
 		if n > conn.upgrader.MaxMessageSize {
 			conn.CloseWithCode(CloseMessageTooBig, ErrTooLargePayload.Error())
-			return -1, ErrTooLargePayload
+			return nilOpcode, ErrTooLargePayload
 		}
 
 		if isMasked {
 			b, err := conn.nRead(4)
 			if err != nil {
 				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return -1, err
+				return nilOpcode, err
 			}
 			copy(conn.reader.maskKey[:], b)
 		}
@@ -103,18 +103,18 @@ func (conn *Conn) acceptFrame() (int8, error) {
 		if isControl(opcode) {
 			if n > 125 {
 				conn.CloseWithCode(CloseProtocolError, ErrInvalidControlFrame.Error())
-				return -1, ErrInvalidControlFrame
+				return nilOpcode, ErrInvalidControlFrame
 			}
 			switch opcode {
 			case OpcodeClose: // TODO: i have to close with the payload
 				conn.CloseWithPayload(n)
-				return -1, fatal(ErrConnClosed)
+				return nilOpcode, fatal(ErrConnClosed)
 			case OpcodePing:
 				conn.pong(n)
 			case OpcodePong:
 				if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
 					conn.CloseWithCode(CloseInternalServerErr, "timeout")
-					return -1, fatal(ErrConnClosed)
+					return nilOpcode, fatal(ErrConnClosed)
 				}
 			}
 			continue
@@ -127,7 +127,7 @@ func (conn *Conn) acceptFrame() (int8, error) {
 		conn.reader.isMasked = isMasked
 		conn.reader.fragments++
 
-		return int8(opcode), nil
+		return opcode, nil
 	}
 }
 
@@ -136,9 +136,9 @@ func (conn *Conn) acceptFrame() (int8, error) {
 // The returned reader allows streaming the message payload frame-by-frame,
 // and the second return value indicates the message type (e.g., Text or Binary).
 // All errors return are of type snap.FatalError indicating that the error is fatal and the connection got closed.
-func (conn *Conn) NextReader() (io.Reader, int8, error) {
+func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	if conn.isClosed.Load() {
-		return nil, -1, fatal(ErrConnClosed)
+		return nil, 0, fatal(ErrConnClosed)
 	}
 
 	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
@@ -150,7 +150,7 @@ func (conn *Conn) NextReader() (io.Reader, int8, error) {
 	conn.reader.fragments = 0
 	opcode, err := conn.acceptFrame()
 	if err != nil {
-		return nil, -1, fatal(err)
+		return nil, 0, fatal(err)
 	}
 
 	conn.reader.totalSize = conn.reader.remaining
@@ -229,19 +229,19 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
 // The context controls cancellation or timeout. If the connection is closed or the context expires,
 // it returns an appropriate error.
-func (conn *Conn) ReadMessage() (msgType int8, data []byte, err error) {
+func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 	if conn.isClosed.Load() {
-		return -1, nil, fatal(ErrConnClosed)
+		return nilOpcode, nil, fatal(ErrConnClosed)
 	}
 
 	reader, msgType, err := conn.NextReader()
 	if err != nil {
-		return -1, nil, err
+		return nilOpcode, nil, err
 	}
 
 	data, err = io.ReadAll(reader)
 	if err != nil {
-		return -1, nil, err
+		return nilOpcode, nil, err
 	}
 
 	return msgType, data, nil

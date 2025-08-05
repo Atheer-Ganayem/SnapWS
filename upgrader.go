@@ -29,7 +29,7 @@ func NewUpgrader(opts *Options) *Upgrader {
 	u := &Upgrader{
 		Options: opts,
 	}
-	if opts.PoolWriteBuffers {
+	if !opts.DisableWriteBuffersPooling {
 		u.WritePool = sync.Pool{
 			New: func() any {
 				b := make([]byte, opts.WriteBufferSize)
@@ -42,7 +42,7 @@ func NewUpgrader(opts *Options) *Upgrader {
 }
 
 func (u *Upgrader) getWriteBuf() []byte {
-	if u.PoolWriteBuffers {
+	if !u.DisableWriteBuffersPooling {
 		return *u.WritePool.Get().(*[]byte)
 	}
 

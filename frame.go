@@ -27,6 +27,8 @@ const (
 	OpcodeClose        = 0x8 // Connection close
 	OpcodePing         = 0x9 // Ping
 	OpcodePong         = 0xA // Pong
+
+	nilOpcode = 0x3 // internal use
 )
 
 const MaxHeaderSize = 14

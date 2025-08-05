@@ -1,6 +1,60 @@
 package snapws
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+type mu struct {
+	conn *Conn
+	ch   chan struct{}
+}
+
+func newMu(c *Conn) *mu {
+	return &mu{conn: c, ch: make(chan struct{}, 1)}
+}
+
+func (m *mu) lock() {
+	m.ch <- struct{}{}
+}
+
+func (m *mu) unLock() {
+	<-m.ch
+}
+
+func (m *mu) tryUnlock() {
+	select {
+	case <-m.ch:
+	default:
+	}
+}
+
+func (m *mu) lockCtx(ctx context.Context) error {
+	if ctx == nil {
+		m.lock()
+		return nil
+	}
+
+	select {
+	case <-m.conn.done:
+		return fatal(ErrConnClosed)
+	case m.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *mu) lockTimer(t *time.Timer) error {
+	select {
+	case <-m.conn.done:
+		return fatal(ErrConnClosed)
+	case m.ch <- struct{}{}:
+		return nil
+	case <-t.C:
+		return ErrTimeout
+	}
+}
 
 // Peek n this discards n from the reader.
 // Used to simplify code.
@@ -14,34 +68,4 @@ func (conn *Conn) nRead(n int) ([]byte, error) {
 	_, _ = conn.readBuf.Discard(n)
 
 	return b, nil
-}
-
-// Locks "wLock" indicating that a writer has been intiated.
-// It tires to aquire the lock, if the provided context is done before
-// succeeding to aquiring the lock, it return an error.
-func (conn *Conn) lockW(ctx context.Context) error {
-	select {
-	case <-conn.done:
-		return fatal(ErrConnClosed)
-	case conn.writer.lock <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// Unlocks "wLock", indicating that the writer has finished.
-// Returns a snapws.FatalError if the connection is closed.
-// Returns nil if unlocking succeeds or if it was already unlocked.
-func (conn *Conn) unlockW() error {
-	select {
-	case _, ok := <-conn.writer.lock:
-		if !ok {
-			return fatal(ErrChannelClosed)
-		}
-		return nil
-	default:
-		// already unlocked
-		return nil
-	}
 }

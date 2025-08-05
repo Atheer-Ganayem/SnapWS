@@ -52,8 +52,8 @@ type Options struct {
 	WriteBufferSize int
 
 	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
-	// but may increase latency in some scenarios. Disabled by default.
-	PoolWriteBuffers bool
+	// but may increase latency in some scenarios. Enabled by default.
+	DisableWriteBuffersPooling bool
 
 	// subProtocols defines the list of supported WebSocket sub-protocols by the server.
 	// During the handshake, the server will select the first matching protocol from the

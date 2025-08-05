@@ -40,6 +40,9 @@ type Conn struct {
 	readBuf *bufio.Reader
 
 	controlWriter *ControlWriter
+
+	/// testing
+	writeLock *mu
 }
 
 // ManagedConn is a Conn that is tracked by a Manager.
@@ -56,9 +59,8 @@ type ManagedConn[KeyType comparable] struct {
 type ControlWriter struct {
 	conn *Conn
 	buf  []byte
-	sig  chan struct{}
 	err  chan error
-	lock chan struct{} // full = locked
+	lock *mu
 	t    *time.Timer
 }
 
@@ -66,9 +68,8 @@ func (conn *Conn) NewControlWriter() *ControlWriter {
 	cw := &ControlWriter{
 		conn: conn,
 		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
-		sig:  make(chan struct{}),
 		err:  make(chan error),
-		lock: make(chan struct{}, 1),
+		lock: newMu(conn),
 	}
 
 	return cw
@@ -82,6 +83,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 		SubProtocol: subProtocol,
 		done:        make(chan struct{}),
 	}
+	conn.writeLock = newMu(conn)
 
 	size := u.ReadBufferSize
 	if size == 0 && br != nil {
@@ -97,52 +99,13 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 	conn.writer = conn.newWriter(OpcodeText)
 	conn.controlWriter = conn.NewControlWriter()
 
-	go conn.listen()
-	go conn.pingLoop()
+	// go conn.pingLoop()
 
 	return conn
 }
 
 func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[KeyType] {
 	return &ManagedConn[KeyType]{Conn: conn, Key: key, Manager: m}
-}
-
-// A loop that runs as long as the connection is alive.
-// Listens for outgoing frames.
-// It gives priotiry to control frames.
-func (conn *Conn) listen() {
-	for {
-		select {
-		case _, ok := <-conn.controlWriter.sig:
-			if !ok {
-				conn.controlWriter.err <- fatal(ErrChannelClosed)
-				return
-			}
-			conn.controlWriter.err <- conn.sendFrame(conn.controlWriter.buf)
-
-		case _, ok := <-conn.writer.sig:
-			if !ok {
-				if conn.writer != nil {
-					conn.writer.sendErr(fatal(ErrChannelClosed))
-				}
-				return
-			}
-
-			select {
-			case <-conn.writer.ctx.Done():
-				conn.writer.sendErr(conn.writer.ctx.Err())
-			default:
-				err := conn.raw.SetWriteDeadline(time.Now().Add(conn.upgrader.WriteWait))
-				err = fatal(err)
-				if err == nil {
-					err = conn.sendFrame(conn.writer.buf[conn.writer.start:conn.writer.used])
-				}
-				if conn.writer.ctx.Err() == nil {
-					conn.writer.sendErr(err)
-				}
-			}
-		}
-	}
 }
 
 // A loop that runs as long as the connection is alive.
@@ -169,18 +132,13 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		conn.writer.Close() // writer needs conn.done to work properly
 		close(conn.done)
 		conn.isClosed.Store(true)
-
 		conn.controlWriter.writeClose(code, reason)
-
-		close(conn.writer.sig)
-		close(conn.writer.lock)
-		// close(conn.controlWriter.sig)
 
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
 
-		if conn.upgrader.PoolWriteBuffers {
+		if !conn.upgrader.DisableWriteBuffersPooling {
 			conn.upgrader.WritePool.Put(&conn.writer.buf)
 		}
 	})

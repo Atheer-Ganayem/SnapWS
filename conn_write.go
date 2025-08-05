@@ -22,10 +22,8 @@ type ConnWriter struct {
 	opcode     uint8
 	closed     bool
 	flushCount int
-	lock       chan struct{}
-	sig        chan struct{}
+	lock       *mu
 	ctx        context.Context
-	errCh      chan error
 }
 
 // newWriter is a constructor for conn.writer, only to be used once.
@@ -35,19 +33,13 @@ func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
 		conn:   conn,
 		buf:    conn.upgrader.getWriteBuf(),
 		opcode: opcode,
-		lock:   make(chan struct{}, 1),
-		sig:    make(chan struct{}),
+		lock:   newMu(conn),
 		closed: true,
-		errCh:  make(chan error),
 	}
 }
 
 // resets the writer to prepare it for the next write.
 func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
 	w.start = MaxHeaderSize
 	w.used = MaxHeaderSize
 	w.opcode = opcode
@@ -75,7 +67,7 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, e
 		return nil, ErrWriterNotClosed
 	}
 
-	err := conn.lockW(ctx)
+	err := conn.writer.lock.lockCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,60 +136,48 @@ func (w *ConnWriter) Flush(FIN bool) error {
 	if err != nil {
 		return err
 	}
-	select {
-	case <-w.conn.done:
-		return fatal(ErrChannelClosed)
-	case <-w.ctx.Done():
-		return w.ctx.Err()
-	case w.sig <- struct{}{}:
-	}
 
-	select {
-	case <-w.ctx.Done():
-		return w.ctx.Err()
-	case err, ok := <-w.errCh:
-		if !ok {
-			return fatal(ErrChannelClosed)
-		}
-		if IsFatalErr(err) {
-			w.conn.CloseWithCode(CloseInternalServerErr, err.Error())
-		}
-		if err == nil {
-			w.flushCount++
-			w.used = MaxHeaderSize
-			w.start = MaxHeaderSize
-		}
+	err = w.conn.writeLock.lockCtx(w.ctx)
+	if err != nil {
 		return err
 	}
+	defer w.conn.writeLock.unLock()
+
+	if err = w.conn.raw.SetWriteDeadline(time.Now().Add(w.conn.upgrader.WriteWait)); err != nil {
+		w.conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+		return fatal(err)
+	}
+
+	err = w.conn.sendFrame(w.buf[w.start:w.used])
+	if err != nil {
+		w.conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+		return err
+	}
+
+	w.flushCount++
+	w.used = MaxHeaderSize
+	w.start = MaxHeaderSize
+
+	return nil
 }
 
 // Close flushes the final frame and releases the writer lock.
 func (w *ConnWriter) Close() error {
-	defer w.conn.unlockW()
-	defer func() { w.closed = true }()
-	err := w.Flush(true)
-	return err
-}
-
-func (w *ConnWriter) sendErr(err error) {
-	if w.ctx != nil && w.ctx.Err() == nil {
-		w.errCh <- err
+	if !w.closed {
+		defer w.lock.tryUnlock()
+		defer func() { w.closed = true }()
+		err := w.Flush(true)
+		return err
 	}
+	return nil
 }
 
 // sendFrame writes a prepared frame to the underlying connection.
 // Used internally to send frames from the outbound queues.
 func (conn *Conn) sendFrame(buf []byte) error {
-	written := 0
-	for written < len(buf) {
-		n, err := conn.raw.Write(buf[written:])
-		if err != nil {
-			return fatal(err)
-		}
-		written += n
-	}
+	_, err := conn.raw.Write(buf)
 
-	return nil
+	return fatal(err)
 }
 
 // SendBytes sends the given byte slice as a WebSocket binary message.
@@ -291,7 +271,8 @@ func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 		closeCode = CloseGoingAway
 	}
 
-	cw.lock <- struct{}{}
+	cw.lock.lock()
+
 	// set deadline
 	err := cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait))
 	if err != nil {
@@ -337,40 +318,28 @@ func (cw *ControlWriter) writeControl(opcode byte, n int) error {
 	}
 	defer cw.t.Stop()
 
-	select {
-	case <-cw.t.C:
-		return ErrTimeout
-	case <-cw.conn.done:
-		return fatal(ErrConnClosed)
-	case cw.lock <- struct{}{}:
-		defer func() { <-cw.lock }()
-		// set deadline
-		err := cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait))
-		if err != nil {
-			return fatal(err)
-		}
+	err := cw.lock.lockTimer(cw.t)
+	if err != nil {
+		return err
+	}
+	defer cw.lock.unLock()
 
-		// write header and payload
-		cw.buf = cw.buf[:2]
-		cw.buf[0] = 0x80 + opcode
-		if n > 0 && n <= MaxControlFramePayload {
-			payload, err := cw.conn.nRead(n)
-			if err != nil {
-				return fatal(ErrConnClosed)
-			}
-			cw.buf[1] = byte(n)
-			cw.buf = append(cw.buf, payload...)
-		}
-
-		// signal buf ready
-		select {
-		case cw.sig <- struct{}{}:
-		case <-cw.t.C:
-			return ErrTimeout
-		}
+	// set deadline
+	if err = cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait)); err != nil {
+		return fatal(err)
 	}
 
-	// an error will be sent
-	// we did set a SetWriteDeadline
-	return <-cw.err
+	// write header and payload
+	cw.buf = cw.buf[:2]
+	cw.buf[0] = 0x80 + opcode
+	if n > 0 && n <= MaxControlFramePayload {
+		payload, err := cw.conn.nRead(n)
+		if err != nil {
+			return fatal(ErrConnClosed)
+		}
+		cw.buf[1] = byte(n)
+		cw.buf = append(cw.buf, payload...)
+	}
+
+	return cw.conn.sendFrame(cw.buf)
 }

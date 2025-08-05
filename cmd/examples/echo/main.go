@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 
@@ -9,11 +8,12 @@ import (
 )
 
 var upgrader *snapws.Upgrader
-var ctx = context.Background()
+
+// var ctx = context.Background()
 
 func main() {
 	upgrader = snapws.NewUpgrader(&snapws.Options{
-		PoolWriteBuffers: true,
+		DisableWriteBuffersPooling: true,
 	})
 
 	http.HandleFunc("/", handler)
@@ -38,7 +38,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendBytes(ctx, data)
+		err = conn.SendBytes(nil, data)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
