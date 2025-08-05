@@ -99,7 +99,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 	conn.writer = conn.newWriter(OpcodeText)
 	conn.controlWriter = conn.NewControlWriter()
 
-	// go conn.pingLoop()
+	go conn.pingLoop()
 
 	return conn
 }
