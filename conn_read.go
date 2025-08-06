@@ -9,13 +9,13 @@ import (
 	"unicode/utf8"
 )
 
-// ConnReader provides an io.Reader for a single WebSocket message.
+// connReader provides an io.Reader for a single WebSocket message.
 //
 // Concurrency:
-//   - Only one goroutine may read from a Conn (and thus its ConnReader)
+//   - Only one goroutine may read from a Conn (and thus its connReader)
 //     at a time. Concurrent reads on the same connection or the same
-//     ConnReader are not supported.
-type ConnReader struct {
+//     connReader are not supported.
+type connReader struct {
 	conn *Conn
 	// message info
 	totalSize int
@@ -178,11 +178,7 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 //     it will transparently fetch and continue reading them.
 //   - If a fatal error occurs (protocol violation, closed connection, etc.),
 //     the connection will be closed and a fatal error will be returned.
-func (r *ConnReader) Read(p []byte) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-
+func (r *connReader) Read(p []byte) (n int, err error) {
 	// if we reached the end if the frame and a Continuation frame is expected.
 	if r.remaining == 0 && !r.fin {
 		// checking if we reached the ReaderMaxFragments before reading the next frame.

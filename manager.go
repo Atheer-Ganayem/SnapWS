@@ -216,7 +216,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 // data must be a valid UTF-8 string, otherwise an error will be returned.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data []byte) (int, error) {
-	if !utf8.Valid(data) {
+	if !m.Upgrader.SkipUTF8Validation && !utf8.Valid(data) {
 		return 0, ErrInvalidUTF8
 	}
 	return m.broadcast(ctx, exclude, OpcodeText, data)

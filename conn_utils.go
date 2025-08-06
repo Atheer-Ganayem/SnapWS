@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+type PooledBuf struct {
+	buf []byte
+}
+
 // Returns the underlying net conn.
 func (conn *Conn) NetConn() net.Conn {
 	return conn.raw

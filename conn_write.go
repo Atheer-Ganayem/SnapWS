@@ -8,11 +8,12 @@ import (
 	"unicode/utf8"
 )
 
-// ConnWriter is NOT safe for concurrent use.
+// connWriter is NOT safe for concurrent use.
 // Only one goroutine may call Write/Flush/Close at a time.
 // Use Conn.NextWriter to safely obtain exclusive access to a writer.
-type ConnWriter struct {
+type connWriter struct {
 	conn *Conn
+	pb   *PooledBuf
 	buf  []byte
 	// The start of the frame in the buf. its used to save space for the frame header.
 	start int
@@ -28,14 +29,17 @@ type ConnWriter struct {
 
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
-func (conn *Conn) newWriter(opcode uint8, b []byte) *ConnWriter {
+func (conn *Conn) newWriter(opcode uint8, b []byte) *connWriter {
 	if conn.upgrader.WriteBufferSize == 0 && b != nil || (b != nil && cap(b) == conn.upgrader.WriteBufferSize) {
 		b = b[:]
+	} else if conn.upgrader.DisableWriteBuffersPooling {
+		b = make([]byte, conn.upgrader.WriteBufferSize)
 	} else {
-		b = conn.upgrader.getWriteBuf()
+		pb := conn.upgrader.writePool.Get().(*PooledBuf)
+		b = pb.buf
 	}
 
-	return &ConnWriter{
+	return &connWriter{
 		conn:   conn,
 		buf:    b,
 		opcode: opcode,
@@ -45,7 +49,7 @@ func (conn *Conn) newWriter(opcode uint8, b []byte) *ConnWriter {
 }
 
 // resets the writer to prepare it for the next write.
-func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
+func (w *connWriter) reset(ctx context.Context, opcode uint8) {
 	w.start = MaxHeaderSize
 	w.used = MaxHeaderSize
 	w.opcode = opcode
@@ -59,7 +63,7 @@ func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
 // The context given, is to be used for all the writer's functions as long is its not closed,
 // This mean its used when its trying to optain the next writer and flushing.
 // After you close the writer and call NextWriter again, you must give it a new context.
-func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, error) {
+func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*connWriter, error) {
 	if conn.isClosed.Load() {
 		return nil, fatal(ErrConnClosed)
 	}
@@ -85,7 +89,7 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, e
 
 // Write appends bytes to the writer buffer and flushes if full.
 // Automatically handles splitting into multiple frames.
-func (w *ConnWriter) Write(p []byte) (n int, err error) {
+func (w *connWriter) Write(p []byte) (n int, err error) {
 	if w == nil {
 		return 0, ErrWriterUnintialized
 	}
@@ -122,7 +126,7 @@ func (w *ConnWriter) Write(p []byte) (n int, err error) {
 //     No point in retrying.
 //   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
 //     positions have been reset.
-func (w *ConnWriter) Flush(FIN bool) error {
+func (w *connWriter) Flush(FIN bool) error {
 	if w.conn.isClosed.Load() {
 		return fatal(ErrChannelClosed)
 	}
@@ -168,7 +172,7 @@ func (w *ConnWriter) Flush(FIN bool) error {
 }
 
 // Close flushes the final frame and releases the writer lock.
-func (w *ConnWriter) Close() error {
+func (w *connWriter) Close() error {
 	if !w.closed {
 		defer w.lock.tryUnlock()
 		defer func() { w.closed = true }()
@@ -196,7 +200,7 @@ func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error
 		return ErrInvalidOPCODE
 	}
 
-	if opcode == OpcodeText {
+	if opcode == OpcodeText && !conn.upgrader.SkipUTF8Validation {
 		if ok := utf8.Valid(b); !ok {
 			return ErrInvalidUTF8
 		}

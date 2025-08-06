@@ -35,8 +35,8 @@ type Conn struct {
 	pingSent    atomic.Bool
 	pingPayload []byte
 
-	reader        *ConnReader
-	writer        *ConnWriter
+	reader        *connReader
+	writer        *connWriter
 	controlWriter *controlWriter
 	writeLock     *mu
 	readBuf       *bufio.Reader
@@ -63,7 +63,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wri
 		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
 	}
 
-	conn.reader = &ConnReader{conn: conn}
+	conn.reader = &connReader{conn: conn}
 	conn.writer = conn.newWriter(OpcodeText, writeBuf)
 	conn.controlWriter = conn.newControlWriter()
 
@@ -176,7 +176,7 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		// close the current writer (if exists) and put the buffer back to the pool (if exists).
 		conn.writer.Close()
 		if !conn.upgrader.DisableWriteBuffersPooling {
-			conn.upgrader.WritePool.Put(conn.writer.buf)
+			conn.upgrader.writePool.Put(conn.writer.pb)
 		}
 
 		// close the done channel and set isClosed=true to prevent any reads and writes.
