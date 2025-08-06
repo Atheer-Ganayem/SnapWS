@@ -29,7 +29,7 @@ type ConnWriter struct {
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
 func (conn *Conn) newWriter(opcode uint8, b []byte) *ConnWriter {
-	if conn.upgrader.WriteBufferSize == 0 {
+	if conn.upgrader.WriteBufferSize == 0 && b != nil || (b != nil && cap(b) == conn.upgrader.WriteBufferSize) {
 		b = b[:]
 	} else {
 		b = conn.upgrader.getWriteBuf()
@@ -54,11 +54,11 @@ func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
 	w.ctx = ctx
 }
 
-// NextWriter locks the write stream and returns a new writer for the given message type.
+// NextWriter locks the data write stream and returns a new writer for the given message type.
 // Must call Close() on the returned writer to release the lock.
 // The context given, is to be used for all the writer's functions as long is its not closed,
-// This mean its used when its writing and flushing. After you close the writer and call NextWriter
-// again, you must give it a new context.
+// This mean its used when its trying to optain the next writer and flushing.
+// After you close the writer and call NextWriter again, you must give it a new context.
 func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, error) {
 	if conn.isClosed.Load() {
 		return nil, fatal(ErrConnClosed)
@@ -66,7 +66,7 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, e
 	if conn.writer == nil {
 		return nil, ErrWriterUnintialized
 	}
-	if msgType != OpcodeText && msgType != OpcodeBinary {
+	if !isData(msgType) {
 		return nil, ErrInvalidOPCODE
 	}
 	if !conn.writer.closed {
@@ -179,13 +179,18 @@ func (w *ConnWriter) Close() error {
 }
 
 // sendFrame writes a prepared frame to the underlying connection.
-// Used internally to send frames from the outbound queues.
+// This function is for internal library use.
 func (conn *Conn) sendFrame(buf []byte) error {
 	_, err := conn.raw.Write(buf)
 
 	return fatal(err)
 }
 
+// Receives a context, opcode (text or binary), and a slice of bytes.
+//   - Tries to optain the next writer
+//   - sends a message of opcode (the given opcode) with the data of the given byte slice.
+//
+// It returns an error. Errors must be checked if fatal.
 func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error {
 	if !isData(opcode) {
 		return ErrInvalidOPCODE
@@ -212,42 +217,35 @@ func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error
 
 // SendBytes sends the given byte slice as a WebSocket binary message.
 //
-// The payload must be non-empty. If not, the method returns snapws.ErrEmptyPayload.
-// The message will be split into fragments if needed based on WriteBufferSize.
-//
-// The returned error must be checked. If it's of type snapws.FatalError,
-// that indicates the connection was closed due to an I/O or protocol error.
-// Any other error means the connection is still open, and you may retry or continue using it.
+// This is a shorthand for SendMessage with OpcodeBinary.
+// The returned error must be checked. If it's a snapws.FatalError,
+// the connection was closed due to an I/O or protocol error.
+// Other errors indicate the connection is still alive and can be reused.
 func (conn *Conn) SendBytes(ctx context.Context, p []byte) error {
 	return conn.SendMessage(ctx, OpcodeBinary, p)
 }
 
-// SendString sends the given string as a WebSocket text message.
+// SendString sends the given byte slice as a WebSocket binary message.
 //
-// The string must be valid UTF-8 and non-empty. If it is not, the method returns
-// snapws.ErrEmptyPayload or snapws.ErrInvalidUTF8. The message will be split
-// into fragments if necessary based on WriteBufferSize.
+// The byte slice must be valid UTF-8. If it is not, the method returns snapws.ErrInvalidUTF8.
 //
-// The returned error must be checked. If it's of type snapws.FatalError,
-// that indicates the connection was closed due to an I/O or protocol error.
-// Any other error means the connection is still open, and you may retry or continue using it.
+// This is a shorthand for SendMessage with OpcodeText.
+// The returned error must be checked. If it's a snapws.FatalError,
+// the connection was closed due to an I/O or protocol error.
+// Other errors indicate the connection is still alive and can be reused.
 func (conn *Conn) SendString(ctx context.Context, p []byte) error {
 	return conn.SendMessage(ctx, OpcodeText, p)
 }
 
 // SendJSON sends the given value as a JSON-encoded WebSocket text message.
 //
-// The value must not be nil. If marshaling fails, the method returns the original
-// marshaling error. The message will be split into fragments if necessary.
+// If marshaling fails, the method returns the original marshaling error.
+// The message will be split into fragments if necessary.
 //
 // The returned error must be checked. If it's of type snapws.FatalError,
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn) SendJSON(ctx context.Context, v any) error {
-	if v == nil {
-		return ErrEmptyPayload
-	}
-
 	w, err := conn.NextWriter(ctx, OpcodeText)
 	if err != nil {
 		return err
@@ -261,35 +259,6 @@ func (conn *Conn) SendJSON(ctx context.Context, v any) error {
 	return w.Close()
 }
 
-// Writes close frame to the ControlWriter.
-// Receive a uint16 closeCode and a string reason and return an error.
-// It tries to write the control frame within the the duration given in: conn.upgrader.WriteWait.
-func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
-	if !isValidCloseCode(closeCode) {
-		closeCode = CloseGoingAway
-	}
-
-	cw.lock.lock()
-
-	// set deadline
-	err := cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait))
-	if err != nil {
-		return
-	}
-
-	cw.buf = cw.buf[:4]
-	cw.buf[0] = 0x80 + OpcodeClose
-	cw.buf[1] = 2
-	binary.BigEndian.PutUint16(cw.buf[2:4], closeCode)
-	if len(reason) > 0 && len(reason) <= MaxControlFramePayload-2 {
-		cw.buf[1] += byte(len(reason))
-		cw.buf = append(cw.buf, reason...)
-	}
-
-	cw.conn.sendFrame(cw.buf)
-	cw.conn.raw.Close()
-}
-
 // Ping sends a WebSocket ping frame and waits for it to be sent.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
@@ -298,10 +267,8 @@ func (conn *Conn) Ping() error {
 }
 
 // pong sends a pong control frame in response to a ping.
-// Automatically closes the connection on failure.
 // Ping\pong frames are already handeled by the library, you dont need
 // to habdle them manually.
-// all errors returned are fatal because it returns writeControl returned error.
 func (conn *Conn) pong(n int, isMasked bool) error {
 	err := conn.controlWriter.writeControl(OpcodePong, n, isMasked)
 	if IsFatalErr(err) {
@@ -310,9 +277,8 @@ func (conn *Conn) pong(n int, isMasked bool) error {
 	return err
 }
 
-// write control frame.
-// all errors returned are fatal
-func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
+// Writes control frame.
+func (cw *controlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if cw.t == nil {
 		cw.t = time.NewTimer(cw.conn.upgrader.WriteWait)
 	} else {
@@ -353,5 +319,42 @@ func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 		cw.buf = append(cw.buf, payload...)
 	}
 
+	if err := cw.conn.writeLock.lockTimer(cw.t); err != nil {
+		return err
+	}
+	defer cw.conn.writeLock.unLock()
+
 	return cw.conn.sendFrame(cw.buf)
+}
+
+// Writes close frame to the ControlWriter.
+// Receive a uint16 closeCode and a string reason and return an error.
+// It tries to write the control frame within the the duration given in: conn.upgrader.WriteWait.
+func (cw *controlWriter) writeClose(closeCode uint16, reason string) {
+	if !isValidCloseCode(closeCode) {
+		closeCode = CloseGoingAway
+	}
+
+	// lock without unlocking because this is the last write.
+	cw.lock.lock()
+
+	// set deadline
+	err := cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait))
+	if err != nil {
+		return
+	}
+
+	cw.buf = cw.buf[:4]
+	cw.buf[0] = 0x80 + OpcodeClose
+	cw.buf[1] = 2
+	binary.BigEndian.PutUint16(cw.buf[2:4], closeCode)
+	if len(reason) > 0 && len(reason) <= MaxControlFramePayload-2 {
+		cw.buf[1] += byte(len(reason))
+		cw.buf = append(cw.buf, reason...)
+	}
+
+	// lock without unlocking because this is the last write.
+	cw.conn.writeLock.lock()
+	cw.conn.sendFrame(cw.buf)
+	cw.conn.raw.Close()
 }

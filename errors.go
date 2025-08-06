@@ -55,7 +55,6 @@ var (
 	// does not match the expected type (e.g., expecting text but received binary).
 	ErrMessageTypeMismatch     = errors.New("websocket message type did not match expected type")
 	ErrChannelClosed           = errors.New("channel is closed")
-	ErrEmptyPayload            = errors.New("cannot send empty payload")
 	ErrConnClosed              = errors.New("connection is closed")
 	ErrWriterClosed            = errors.New("writer is closed")
 	ErrWriterUnintialized      = errors.New("writer is not intialized")

@@ -16,7 +16,7 @@ import (
 // frames (ping/pong/close), and lifecycle state.
 type Conn struct {
 	raw net.Conn
-	// curently this is a server library, this is saved for future use
+	// curently this is a server library its always true. this is saved for future use.
 	isServer bool
 	upgrader *Upgrader
 	// Empty string means its a raw websocket
@@ -35,15 +35,11 @@ type Conn struct {
 	pingSent    atomic.Bool
 	pingPayload []byte
 
-	reader *ConnReader
-	writer *ConnWriter
-
-	readBuf *bufio.Reader
-
-	controlWriter *ControlWriter
-
-	/// testing
-	writeLock *mu
+	reader        *ConnReader
+	writer        *ConnWriter
+	controlWriter *controlWriter
+	writeLock     *mu
+	readBuf       *bufio.Reader
 }
 
 func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, writeBuf []byte) *Conn {
@@ -58,7 +54,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wri
 	conn.writeLock = newMu(conn)
 
 	size := u.ReadBufferSize
-	if size == 0 && br != nil {
+	if (size == 0 && br != nil) || (br != nil && size == br.Size()) {
 		conn.readBuf = br
 	} else {
 		if size < MaxHeaderSize {
@@ -94,7 +90,7 @@ func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[
 
 // Used to write control frames.
 // This is needed because control frames can be written mid data frames.
-type ControlWriter struct {
+type controlWriter struct {
 	conn    *Conn
 	buf     []byte
 	maskKey [4]byte
@@ -103,8 +99,8 @@ type ControlWriter struct {
 	t       *time.Timer
 }
 
-func (conn *Conn) newControlWriter() *ControlWriter {
-	cw := &ControlWriter{
+func (conn *Conn) newControlWriter() *controlWriter {
+	cw := &controlWriter{
 		conn: conn,
 		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
 		err:  make(chan error),
@@ -176,28 +172,29 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		if conn.ticker != nil {
 			conn.ticker.Stop()
 		}
-		conn.writer.Close() // writer needs conn.done to work properly
+
+		// close the current writer (if exists) and put the buffer back to the pool (if exists).
+		conn.writer.Close()
+		if !conn.upgrader.DisableWriteBuffersPooling {
+			conn.upgrader.WritePool.Put(&conn.writer.buf)
+		}
+
+		// close the done channel and set isClosed=true to prevent any reads and writes.
 		close(conn.done)
 		conn.isClosed.Store(true)
+
+		// writer a close frame.
 		conn.controlWriter.writeClose(code, reason)
 
+		// run hooks.
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
 		if conn.onClose != nil {
 			conn.onClose()
 		}
-
-		if !conn.upgrader.DisableWriteBuffersPooling {
-			conn.upgrader.WritePool.Put(&conn.writer.buf)
-		}
 	})
 }
-
-// Used to trigger closeWithCode with the code and reason parsed from payload.
-// The payload must be of at least length 2, first 2 bytes are uint16 represnting the close code,
-// The rest of the payload is optional, represnting a UTF-8 reason.
-// Any violations would cause a close with CloseProtocolError with the apropiate reason.
 
 // This function is called upon receiving a close frame from the client.
 // It receives "n" representing the payload length, and "isMasked".

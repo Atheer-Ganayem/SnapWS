@@ -9,7 +9,7 @@ func (r *ConnReader) unMask(b []byte) {
 	r.unMaskStd(b)
 }
 
-func (cw *ControlWriter) unMask(p []byte) {
+func (cw *controlWriter) unMask(p []byte) {
 	for i := range p {
 		p[i] = p[i] ^ cw.maskKey[i%4]
 	}

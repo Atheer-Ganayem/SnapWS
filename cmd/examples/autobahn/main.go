@@ -11,7 +11,7 @@ var upgrader *snapws.Upgrader
 
 func main() {
 	upgrader = snapws.NewUpgrader(&snapws.Options{
-		MaxMessageSize: snapws.DefaultMaxMessageSize,
+		MaxMessageSize: snapws.DefaultMaxMessageSize * 16, // autobahn tests messages up to 16MB
 	})
 
 	http.HandleFunc("/", handler)
@@ -38,6 +38,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 		err = conn.SendMessage(nil, t, data)
 		if snapws.IsFatalErr(err) {
+			fmt.Println("fatal", err)
 			return // Connection closed
 		} else if err != nil {
 			fmt.Println("Non-fatal error:", err)

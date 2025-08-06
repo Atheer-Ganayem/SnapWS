@@ -3,8 +3,28 @@ package snapws
 import (
 	"bytes"
 	"context"
+	"net"
 	"time"
 )
+
+// Returns the underlying net conn.
+func (conn *Conn) NetConn() net.Conn {
+	return conn.raw
+}
+
+// Peek n this discards n from the reader.
+// Used to simplify code.
+func (conn *Conn) nRead(n int) ([]byte, error) {
+	b, err := conn.readBuf.Peek(n)
+	if err != nil {
+		return nil, err
+	}
+
+	// never fails
+	_, _ = conn.readBuf.Discard(n)
+
+	return b, nil
+}
 
 type mu struct {
 	conn *Conn
@@ -31,7 +51,7 @@ func (m *mu) tryUnlock() {
 }
 
 func (m *mu) lockCtx(ctx context.Context) error {
-	if ctx == nil {
+	if ctx == nil || ctx.Done() == nil {
 		m.lock()
 		return nil
 	}
@@ -55,20 +75,6 @@ func (m *mu) lockTimer(t *time.Timer) error {
 	case <-t.C:
 		return ErrTimeout
 	}
-}
-
-// Peek n this discards n from the reader.
-// Used to simplify code.
-func (conn *Conn) nRead(n int) ([]byte, error) {
-	b, err := conn.readBuf.Peek(n)
-	if err != nil {
-		return nil, err
-	}
-
-	// never fails
-	_, _ = conn.readBuf.Discard(n)
-
-	return b, nil
 }
 
 func comparePayload(p1 []byte, p2 []byte) bool {
