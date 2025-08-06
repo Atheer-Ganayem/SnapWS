@@ -81,7 +81,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	subProtocol := selectSubProtocol(r, u.SubProtocols)
 	if subProtocol == "" && u.RejectRaw {
 		http.Error(w, "unsupported or missing subprotocol", http.StatusBadRequest)
-		return nil, ErrNotSupportedSubProtocols
+		return nil, ErrUnsupportedSubProtocols
 	}
 
 	// running middlewares
@@ -128,7 +128,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	conn := u.newConn(c, subProtocol, brw.Reader)
+	conn := u.newConn(c, subProtocol, brw.Reader, p)
 	if u.OnConnect != nil {
 		u.OnConnect(conn)
 	}

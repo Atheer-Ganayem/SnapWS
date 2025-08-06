@@ -54,8 +54,8 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, ErrInvalidOPCODE
 		}
 		if (rsv1 | rsv2 | rsv3) != 0 {
-			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
-			return nilOpcode, ErrReceivedReservedBits
+			conn.CloseWithCode(CloseProtocolError, ErrUnnegotiatedRsvBits.Error())
+			return nilOpcode, ErrUnnegotiatedRsvBits
 		}
 		if conn.isServer && !isMasked {
 			conn.CloseWithCode(CloseProtocolError, errExpectedMaskedFrame.Error())
@@ -186,8 +186,8 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 			return 0, fatal(err)
 		}
 		if opcode != OpcodeContinuation {
-			r.conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-			return 0, fatal(ErrInvalidOPCODE)
+			r.conn.CloseWithCode(CloseProtocolError, ErrExpectedContinuation.Error())
+			return 0, fatal(ErrExpectedContinuation)
 		}
 		r.totalSize += r.remaining
 		if r.totalSize > r.conn.upgrader.MaxMessageSize {
