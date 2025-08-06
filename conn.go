@@ -176,7 +176,7 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		// close the current writer (if exists) and put the buffer back to the pool (if exists).
 		conn.writer.Close()
 		if !conn.upgrader.DisableWriteBuffersPooling {
-			conn.upgrader.WritePool.Put(&conn.writer.buf)
+			conn.upgrader.WritePool.Put(conn.writer.buf)
 		}
 
 		// close the done channel and set isClosed=true to prevent any reads and writes.

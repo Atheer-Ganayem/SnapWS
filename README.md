@@ -20,12 +20,12 @@ It takes care of ping/pong, close frames, connection safety, and lifecycle manag
 
 ## ✨ Features
 
-- ✅ **Minimal code**: focus on your app, not protocol details
+- ✅ Minimal and easy to use API.
+- ✅ Fully passes the [autobahn-testsuite](https://github.com/crossbario/autobahn-testsuite)
 - ✅ Automatic handling of ping/pong and close frames.
-- ✅ Connection management built-in.
-- ✅ Safe for concurrent use.
+- ✅ Written completely in standard library, no external libraries imported.
+- ✅ Connection management built-in (usefull when communicating between different clients like chat apps).
 - ✅ Support for middlewares and connect/disconnect hooks.
-- ✅ Context support for cancellation
 
 ---
 

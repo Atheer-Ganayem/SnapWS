@@ -253,7 +253,7 @@ func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 		return nilOpcode, nil, err
 	}
 
-	if msgType == OpcodeText {
+	if msgType == OpcodeText && !conn.upgrader.SkipUTF8Validation {
 		if ok := utf8.Valid(data); !ok {
 			conn.CloseWithCode(CloseInvalidFramePayloadData, ErrInvalidUTF8.Error())
 			return nilOpcode, nil, fatal(ErrInvalidUTF8)

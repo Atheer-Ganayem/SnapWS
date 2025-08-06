@@ -43,10 +43,12 @@ func (m *mu) unLock() {
 	<-m.ch
 }
 
-func (m *mu) tryUnlock() {
+func (m *mu) tryUnlock() bool {
 	select {
 	case <-m.ch:
+		return true
 	default:
+		return false
 	}
 }
 
