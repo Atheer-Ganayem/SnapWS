@@ -29,16 +29,17 @@ type ConnWriter struct {
 
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
-func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
+func (conn *Conn) newWriter(opcode uint8, b []byte) *ConnWriter {
 	w := &ConnWriter{
-		conn: conn,
-		// buf:    b,
+		conn:   conn,
 		opcode: opcode,
 		lock:   newMu(conn),
 		closed: true,
 	}
 
-	if conn.upgrader.DisableWriteBuffersPooling {
+	if cap(b) == conn.upgrader.WriteBufferSize {
+		w.buf = b[:cap(b)]
+	} else if conn.upgrader.DisableWriteBuffersPooling {
 		w.buf = make([]byte, conn.upgrader.WriteBufferSize)
 	} else {
 		w.pb = conn.upgrader.writePool.Get().(*PooledBuf)
