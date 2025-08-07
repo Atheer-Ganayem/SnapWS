@@ -5,17 +5,17 @@ import (
 	"unsafe"
 )
 
-func (r *connReader) unMask(b []byte) {
+func (r *ConnReader) unMask(b []byte) {
 	r.unMaskStd(b)
 }
 
-func (cw *controlWriter) unMask(p []byte) {
+func (cw *ControlWriter) unMask(p []byte) {
 	for i := range p {
 		p[i] = p[i] ^ cw.maskKey[i%4]
 	}
 }
 
-func (r *connReader) unMaskStd(p []byte) {
+func (r *ConnReader) unMaskStd(p []byte) {
 	for i := range p {
 		p[i] = p[i] ^ r.maskKey[r.maskPos%4]
 		r.maskPos++
@@ -23,7 +23,7 @@ func (r *connReader) unMaskStd(p []byte) {
 }
 
 // copied from Coder/websocket, added it to test different masking methods
-func (r *connReader) unMaskCoder(b []byte) {
+func (r *ConnReader) unMaskCoder(b []byte) {
 	key := binary.BigEndian.Uint32(r.maskKey[:])
 	if len(b) >= 8 {
 		key64 := uint64(key)<<32 | uint64(key)
@@ -133,7 +133,7 @@ func (r *connReader) unMaskCoder(b []byte) {
 }
 
 // copied from gorilla/websocket, added it to test different masking methods
-func (r *connReader) unMaskGorilla(p []byte) {
+func (r *ConnReader) unMaskGorilla(p []byte) {
 	mask32 := uint32(r.maskKey[0]) |
 		uint32(r.maskKey[1])<<8 |
 		uint32(r.maskKey[2])<<16 |

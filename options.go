@@ -46,9 +46,9 @@ type Options struct {
 	// maximum fragremnt allowed per an incoming message.
 	// if not set it will default to 0, which means there is no limit.
 	ReaderMaxFragments int
-	// if not set it will use the default http buffer (4kb)
+	// if not set it will use the default http buffers (4kb)
 	ReadBufferSize int
-	// if not set it will use the default http buffer (4kb)
+	// if not set it will default to 4096 bytes
 	WriteBufferSize int
 
 	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
@@ -95,6 +95,9 @@ func (opt *Options) WithDefault() {
 	}
 	if opt.MaxMessageSize == 0 {
 		opt.MaxMessageSize = DefaultMaxMessageSize
+	}
+	if opt.WriteBufferSize == 0 {
+		opt.WriteBufferSize = DefaultWriteBufferSize
 	}
 
 	if !opt.BackpressureStrategy.Valid() {

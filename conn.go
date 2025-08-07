@@ -35,18 +35,18 @@ type Conn struct {
 	pingSent    atomic.Bool
 	pingPayload []byte
 
-	reader *connReader
-	writer *connWriter
+	reader *ConnReader
+	writer *ConnWriter
 
 	readBuf *bufio.Reader
 
-	controlWriter *controlWriter
+	controlWriter *ControlWriter
 
 	/// testing
 	writeLock *mu
 }
 
-func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb []byte) *Conn {
+func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Conn {
 	conn := &Conn{
 		raw:         c,
 		isServer:    true,
@@ -67,8 +67,8 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb 
 		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
 	}
 
-	conn.reader = &connReader{conn: conn}
-	conn.writer = conn.newWriter(OpcodeText, wb)
+	conn.reader = &ConnReader{conn: conn}
+	conn.writer = conn.newWriter(OpcodeText)
 	conn.controlWriter = conn.newControlWriter()
 
 	go conn.pingLoop()
@@ -94,7 +94,7 @@ func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[
 
 // Used to write control frames.
 // This is needed because control frames can be written mid data frames.
-type controlWriter struct {
+type ControlWriter struct {
 	conn    *Conn
 	buf     []byte
 	maskKey [4]byte
@@ -103,8 +103,8 @@ type controlWriter struct {
 	t       *time.Timer
 }
 
-func (conn *Conn) newControlWriter() *controlWriter {
-	cw := &controlWriter{
+func (conn *Conn) newControlWriter() *ControlWriter {
+	cw := &ControlWriter{
 		conn: conn,
 		buf:  make([]byte, 2+4+MaxControlFramePayload), // 2: fin+opce, 4: masking-key, 125: max control frames payload.
 		err:  make(chan error),

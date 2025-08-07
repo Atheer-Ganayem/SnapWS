@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 )
 
-// connWriter is NOT safe for concurrent use.
+// ConnWriter is NOT safe for concurrent use.
 // Only one goroutine may call Write/Flush/Close at a time.
 // Use Conn.NextWriter to safely obtain exclusive access to a writer.
-type connWriter struct {
+type ConnWriter struct {
 	conn *Conn
 	buf  []byte
 	// The start of the frame in the buf. its used to save space for the frame header.
@@ -28,15 +28,10 @@ type connWriter struct {
 
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
-func (conn *Conn) newWriter(opcode uint8, b []byte) *connWriter {
-	if conn.upgrader.WriteBufferSize == 0 && b != nil {
-		b = b[:]
-	} else {
-		b = conn.upgrader.getWriteBuf()
-	}
-	return &connWriter{
+func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
+	return &ConnWriter{
 		conn:   conn,
-		buf:    b,
+		buf:    conn.upgrader.getWriteBuf(),
 		opcode: opcode,
 		lock:   newMu(conn),
 		closed: true,
@@ -44,7 +39,7 @@ func (conn *Conn) newWriter(opcode uint8, b []byte) *connWriter {
 }
 
 // resets the writer to prepare it for the next write.
-func (w *connWriter) reset(ctx context.Context, opcode uint8) {
+func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
 	w.start = MaxHeaderSize
 	w.used = MaxHeaderSize
 	w.opcode = opcode
@@ -58,7 +53,7 @@ func (w *connWriter) reset(ctx context.Context, opcode uint8) {
 // The context given, is to be used for all the writer's functions as long is its not closed,
 // This mean its used when its writing and flushing. After you close the writer and call NextWriter
 // again, you must give it a new context.
-func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*connWriter, error) {
+func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, error) {
 	if conn.isClosed.Load() {
 		return nil, fatal(ErrConnClosed)
 	}
@@ -84,7 +79,7 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*connWriter, e
 
 // Write appends bytes to the writer buffer and flushes if full.
 // Automatically handles splitting into multiple frames.
-func (w *connWriter) Write(p []byte) (n int, err error) {
+func (w *ConnWriter) Write(p []byte) (n int, err error) {
 	if w == nil {
 		return 0, ErrWriterUnintialized
 	}
@@ -121,7 +116,7 @@ func (w *connWriter) Write(p []byte) (n int, err error) {
 //     No point in retrying.
 //   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
 //     positions have been reset.
-func (w *connWriter) Flush(FIN bool) error {
+func (w *ConnWriter) Flush(FIN bool) error {
 	if w.conn.isClosed.Load() {
 		return fatal(ErrChannelClosed)
 	}
@@ -167,7 +162,7 @@ func (w *connWriter) Flush(FIN bool) error {
 }
 
 // Close flushes the final frame and releases the writer lock.
-func (w *connWriter) Close() error {
+func (w *ConnWriter) Close() error {
 	if !w.closed {
 		defer w.lock.tryUnlock()
 		defer func() { w.closed = true }()
@@ -243,6 +238,10 @@ func (conn *Conn) SendString(ctx context.Context, p []byte) error {
 // that indicates the connection was closed due to an I/O or protocol error.
 // Any other error means the connection is still open, and you may retry or continue using it.
 func (conn *Conn) SendJSON(ctx context.Context, v any) error {
+	if v == nil {
+		return ErrEmptyPayload
+	}
+
 	w, err := conn.NextWriter(ctx, OpcodeText)
 	if err != nil {
 		return err
@@ -259,7 +258,7 @@ func (conn *Conn) SendJSON(ctx context.Context, v any) error {
 // Writes close frame to the ControlWriter.
 // Receive a uint16 closeCode and a string reason and return an error.
 // It tries to write the control frame within the the duration given in: conn.upgrader.WriteWait.
-func (cw *controlWriter) writeClose(closeCode uint16, reason string) {
+func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 	if !isValidCloseCode(closeCode) {
 		closeCode = CloseGoingAway
 	}
@@ -307,7 +306,7 @@ func (conn *Conn) pong(n int, isMasked bool) error {
 
 // write control frame.
 // all errors returned are fatal
-func (cw *controlWriter) writeControl(opcode byte, n int, isMasked bool) error {
+func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if cw.t == nil {
 		cw.t = time.NewTimer(cw.conn.upgrader.WriteWait)
 	} else {

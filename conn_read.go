@@ -9,13 +9,13 @@ import (
 	"unicode/utf8"
 )
 
-// connReader provides an io.Reader for a single WebSocket message.
+// ConnReader provides an io.Reader for a single WebSocket message.
 //
 // Concurrency:
-//   - Only one goroutine may read from a Conn (and thus its connReader)
+//   - Only one goroutine may read from a Conn (and thus its ConnReader)
 //     at a time. Concurrent reads on the same connection or the same
-//     connReader are not supported.
-type connReader struct {
+//     ConnReader are not supported.
+type ConnReader struct {
 	conn *Conn
 	// message info
 	totalSize int
@@ -54,8 +54,8 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, ErrInvalidOPCODE
 		}
 		if (rsv1 | rsv2 | rsv3) != 0 {
-			conn.CloseWithCode(CloseProtocolError, ErrUnnegotiatedRsvBits.Error())
-			return nilOpcode, ErrUnnegotiatedRsvBits
+			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
+			return nilOpcode, ErrReceivedReservedBits
 		}
 		if conn.isServer && !isMasked {
 			conn.CloseWithCode(CloseProtocolError, errExpectedMaskedFrame.Error())
@@ -175,7 +175,7 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 //     it will transparently fetch and continue reading them.
 //   - If a fatal error occurs (protocol violation, closed connection, etc.),
 //     the connection will be closed and a fatal error will be returned.
-func (r *connReader) Read(p []byte) (n int, err error) {
+func (r *ConnReader) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
