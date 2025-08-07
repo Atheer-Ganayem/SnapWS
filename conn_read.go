@@ -29,9 +29,9 @@ type ConnReader struct {
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
-// If the frame is a data frame it returns its opcode and an error. if the frame if a control frame,
+// If the frame is a data frame it returns its opcode and an error. if the frame is a control frame,
 // it handles it and keeps reading till it reads a data frame.
-// Note: it resets the conn.reader if it reads a valid control frame,
+// Note: it resets the conn.reader (only the current frame info) if it reads a valid control frame,
 // because of that, you should only call it when you are ready to reset it.
 func (conn *Conn) acceptFrame() (uint8, error) {
 	for {
@@ -41,6 +41,7 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, fatal(err)
 		}
 
+		// reading header values
 		fin := b[0]&0b10000000 == 128
 		rsv1 := b[0] & 0b01000000
 		rsv2 := b[0] & 0b00100000
@@ -54,14 +55,15 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, ErrInvalidOPCODE
 		}
 		if (rsv1 | rsv2 | rsv3) != 0 {
-			conn.CloseWithCode(CloseProtocolError, ErrReceivedReservedBits.Error())
-			return nilOpcode, ErrReceivedReservedBits
+			conn.CloseWithCode(CloseProtocolError, ErrUnnegotiatedRsvBits.Error())
+			return nilOpcode, ErrUnnegotiatedRsvBits
 		}
 		if conn.isServer && !isMasked {
 			conn.CloseWithCode(CloseProtocolError, errExpectedMaskedFrame.Error())
 			return nilOpcode, errExpectedMaskedFrame
 		}
 
+		// reading length
 		n := 0
 		switch lengthB {
 		case 127:
@@ -92,6 +94,7 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			return nilOpcode, ErrTooLargePayload
 		}
 
+		// handling control frames
 		if isControl(opcode) {
 			if !fin || n > MaxControlFramePayload {
 				conn.CloseWithCode(CloseProtocolError, ErrInvalidControlFrame.Error())
@@ -113,7 +116,7 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			continue
 		}
 
-		// reseting conn.reader
+		// reseting conn.reader current frame info.
 		conn.reader.fin = fin
 		conn.reader.remaining = n
 		conn.reader.maskPos = 0
@@ -161,7 +164,7 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	conn.reader.fragments = 0
 	conn.reader.totalSize = conn.reader.remaining
 
-	return conn.reader, opcode, nil
+	return &conn.reader, opcode, nil
 }
 
 // Read implements the io.Reader interface for ConnReader.
@@ -176,29 +179,27 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 //   - If a fatal error occurs (protocol violation, closed connection, etc.),
 //     the connection will be closed and a fatal error will be returned.
 func (r *ConnReader) Read(p []byte) (n int, err error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-
+	// if we reached the end if the frame and a Continuation frame is expected.
 	if r.remaining == 0 && !r.fin {
+		// checking if we reached the ReaderMaxFragments before reading the next frame.
+		if r.conn.upgrader.ReaderMaxFragments > 0 && r.fragments >= r.conn.upgrader.ReaderMaxFragments {
+			r.conn.CloseWithCode(ClosePolicyViolation, ErrTooMuchFragments.Error())
+			return 0, fatal(ErrTooMuchFragments)
+		}
+
 		opcode, err := r.conn.acceptFrame()
 		if err != nil {
 			return 0, fatal(err)
 		}
 		if opcode != OpcodeContinuation {
-			r.conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-			return 0, fatal(ErrInvalidOPCODE)
+			r.conn.CloseWithCode(CloseProtocolError, ErrExpectedContinuation.Error())
+			return 0, fatal(ErrExpectedContinuation)
 		}
 		r.totalSize += r.remaining
 		if r.totalSize > r.conn.upgrader.MaxMessageSize {
 			r.conn.CloseWithCode(CloseMessageTooBig, ErrMessageTooLarge.Error())
 			return 0, fatal(ErrMessageTooLarge)
 		}
-	}
-
-	if r.conn.upgrader.ReaderMaxFragments > 0 && r.fragments > r.conn.upgrader.ReaderMaxFragments {
-		r.conn.CloseWithCode(ClosePolicyViolation, ErrTooMuchFragments.Error())
-		return 0, fatal(ErrTooMuchFragments)
 	}
 
 	for {
@@ -248,7 +249,7 @@ func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 		return nilOpcode, nil, err
 	}
 
-	if msgType == OpcodeText {
+	if msgType == OpcodeText && !conn.upgrader.SkipUTF8Validation {
 		if ok := utf8.Valid(data); !ok {
 			conn.CloseWithCode(CloseInvalidFramePayloadData, ErrInvalidUTF8.Error())
 			return nilOpcode, nil, fatal(ErrInvalidUTF8)
@@ -295,7 +296,7 @@ func (conn *Conn) ReadString() ([]byte, error) {
 }
 
 // ReadJSON reads a text WebSocket message and unmarshals its payload into the given value.
-
+//
 // This method expects the message to be of type text and contain valid UTF-8 encoded JSON.
 // If the message is not of type text, it returns snapws.ErrMessageTypeMismatch without
 // closing the connection. if the text is not a valid json, an error will be returned without

@@ -146,10 +146,7 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedCon
 // It takes a context.Context, a connection "key" to exlude (if you want to include every conn
 // you can set it as a zero value of you KeyType), opcode (text or binary), data as a slice of bytes.
 // It returns "n" the number of successfull writes, and an error.
-func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode int, data []byte) (int, error) {
-	if data == nil {
-		return 0, ErrEmptyPayload
-	}
+func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode uint8, data []byte) (int, error) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -162,9 +159,6 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 	connsLength := len(conns)
 	if connsLength == 0 {
 		return 0, nil
-	}
-	if len(data) == 0 {
-		return 0, ErrEmptyPayload
 	}
 
 	var workers int
@@ -188,13 +182,8 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 				if ctx.Err() != nil {
 					return
 				}
-				var err error
-				if opcode == OpcodeText {
-					err = conn.SendString(ctx, data)
-				} else {
-					err = conn.SendBytes(ctx, data)
-				}
-				if err == nil {
+
+				if err := conn.SendMessage(ctx, opcode, data); err == nil {
 					atomic.AddInt64(&n, 1)
 				}
 			}
@@ -224,13 +213,10 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 // broadcast sends a message to all active connections except the connection of key "exclude".
 // It takes a context.Context, a connection "key" to exlude (if you want to include every conn
 // you can set it as a zero value of your KeyType).
-// data must be a non-empty valid UTF-8 string, otherwise an error will be returned.
+// data must be a valid UTF-8 string, otherwise an error will be returned.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data []byte) (int, error) {
-	if len(data) <= 0 {
-		return 0, ErrEmptyPayload
-	}
-	if !utf8.Valid(data) {
+	if !m.Upgrader.SkipUTF8Validation && !utf8.Valid(data) {
 		return 0, ErrInvalidUTF8
 	}
 	return m.broadcast(ctx, exclude, OpcodeText, data)
@@ -239,16 +225,14 @@ func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType,
 // broadcast sends a message to all active connections except the connection of key "exclude".
 // It takes a context.Context, a connection "key" to exlude (if you want to include every conn
 // you can set it as a zero value of your KeyType).
-// data must be a non-empty byte slice, otherwise an error will be returned.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, data []byte) (int, error) {
-	if len(data) <= 0 {
-		return 0, ErrEmptyPayload
-	}
-
 	return m.broadcast(ctx, exclude, OpcodeBinary, data)
 }
 
+// Shut downs the manager:
+// - Closes all connections normaly.
+// - Clears the conns map.
 func (m *Manager[KeyType]) Shutdown() {
 	workers := (len(m.Conns) / 10) + 2
 	var wg sync.WaitGroup

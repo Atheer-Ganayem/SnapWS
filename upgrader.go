@@ -15,7 +15,7 @@ const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // Hold snap.Options. If you wanna learn more about the options go see their docs.
 type Upgrader struct {
 	*Options
-	WritePool sync.Pool
+	writePool sync.Pool
 }
 
 // Created a new upgrader with the given options.
@@ -30,10 +30,9 @@ func NewUpgrader(opts *Options) *Upgrader {
 		Options: opts,
 	}
 	if !opts.DisableWriteBuffersPooling {
-		u.WritePool = sync.Pool{
+		u.writePool = sync.Pool{
 			New: func() any {
-				b := make([]byte, opts.WriteBufferSize)
-				return &b
+				return make([]byte, opts.WriteBufferSize)
 			},
 		}
 	}
@@ -41,12 +40,12 @@ func NewUpgrader(opts *Options) *Upgrader {
 	return u
 }
 
-func (u *Upgrader) getWriteBuf() []byte {
+func (u *Upgrader) getWriteBuf() *PooledBuf {
 	if !u.DisableWriteBuffersPooling {
-		return *u.WritePool.Get().(*[]byte)
+		return u.writePool.Get().(*PooledBuf)
 	}
 
-	return make([]byte, u.WriteBufferSize)
+	return &PooledBuf{make([]byte, u.WriteBufferSize)}
 }
 
 // Upgrades an HTTP connection to a Websocket connection.
@@ -81,7 +80,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	subProtocol := selectSubProtocol(r, u.SubProtocols)
 	if subProtocol == "" && u.RejectRaw {
 		http.Error(w, "unsupported or missing subprotocol", http.StatusBadRequest)
-		return nil, ErrNotSupportedSubProtocols
+		return nil, ErrUnsupportedSubProtocols
 	}
 
 	// running middlewares
@@ -128,7 +127,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	conn := u.newConn(c, subProtocol, brw.Reader, p)
+	conn := u.newConn(c, subProtocol, brw.Reader)
 	if u.OnConnect != nil {
 		u.OnConnect(conn)
 	}
