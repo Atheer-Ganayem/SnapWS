@@ -81,13 +81,6 @@ type Options struct {
 	//
 	// Note: when the inobundFrames channel is full, the connection will be closed.
 	BackpressureStrategy BackpressureStrategy
-
-	// SkipUTF8Validation disables UTF-8 validation for text frames.
-	// UTF-8 for text messages is required by RFC 6455.
-	// If you need max performance and don't care about the validity of the message.
-	// you can disable it.
-	// Default: false (validation enabled)
-	SkipUTF8Validation bool
 }
 
 func (opt *Options) WithDefault() {

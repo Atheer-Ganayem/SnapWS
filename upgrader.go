@@ -15,7 +15,7 @@ const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // Hold snap.Options. If you wanna learn more about the options go see their docs.
 type Upgrader struct {
 	*Options
-	writePool sync.Pool
+	WritePool sync.Pool
 }
 
 // Created a new upgrader with the given options.
@@ -30,9 +30,10 @@ func NewUpgrader(opts *Options) *Upgrader {
 		Options: opts,
 	}
 	if !opts.DisableWriteBuffersPooling {
-		u.writePool = sync.Pool{
+		u.WritePool = sync.Pool{
 			New: func() any {
-				return make([]byte, opts.WriteBufferSize)
+				b := make([]byte, opts.WriteBufferSize)
+				return &b
 			},
 		}
 	}
@@ -40,12 +41,12 @@ func NewUpgrader(opts *Options) *Upgrader {
 	return u
 }
 
-func (u *Upgrader) getWriteBuf() *PooledBuf {
+func (u *Upgrader) getWriteBuf() []byte {
 	if !u.DisableWriteBuffersPooling {
-		return u.writePool.Get().(*PooledBuf)
+		return *u.WritePool.Get().(*[]byte)
 	}
 
-	return &PooledBuf{make([]byte, u.WriteBufferSize)}
+	return make([]byte, u.WriteBufferSize)
 }
 
 // Upgrades an HTTP connection to a Websocket connection.
