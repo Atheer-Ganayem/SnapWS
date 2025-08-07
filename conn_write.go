@@ -41,8 +41,8 @@ func (conn *Conn) newWriter(opcode uint8) *ConnWriter {
 	if conn.upgrader.DisableWriteBuffersPooling {
 		w.buf = make([]byte, conn.upgrader.WriteBufferSize)
 	} else {
-		pb := conn.upgrader.writePool.Get().(*PooledBuf)
-		w.buf = pb.buf
+		w.pb = conn.upgrader.writePool.Get().(*PooledBuf)
+		w.buf = w.pb.buf
 	}
 
 	return w
