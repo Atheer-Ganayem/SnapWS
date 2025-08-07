@@ -46,7 +46,7 @@ type Conn struct {
 	writeLock *mu
 }
 
-func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Conn {
+func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb []byte) *Conn {
 	conn := &Conn{
 		raw:         c,
 		isServer:    true,
@@ -68,7 +68,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader) *Co
 	}
 
 	conn.reader = &ConnReader{conn: conn}
-	conn.writer = conn.newWriter(OpcodeText)
+	conn.writer = conn.newWriter(OpcodeText, wb)
 	conn.controlWriter = conn.newControlWriter()
 
 	go conn.pingLoop()

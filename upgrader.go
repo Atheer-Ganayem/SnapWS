@@ -128,7 +128,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	conn := u.newConn(c, subProtocol, brw.Reader)
+	conn := u.newConn(c, subProtocol, brw.Reader, p)
 	if u.OnConnect != nil {
 		u.OnConnect(conn)
 	}
