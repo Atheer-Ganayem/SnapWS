@@ -92,7 +92,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	hashedKey := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + GUID))
 	secAcceptKey := base64.StdEncoding.EncodeToString(hashedKey[:])
 
-	// hijacking writer
+	// hijacking connection
 	c, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		http.Error(w, "failed to hijack connection", http.StatusInternalServerError)

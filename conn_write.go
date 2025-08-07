@@ -340,7 +340,7 @@ func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 	}
 
 	// lock without unlocking because this is the last write.
-	cw.lock.lock()
+	cw.lock.forceLock()
 
 	// set deadline
 	err := cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait))
@@ -358,7 +358,7 @@ func (cw *ControlWriter) writeClose(closeCode uint16, reason string) {
 	}
 
 	// lock without unlocking because this is the last write.
-	cw.conn.writeLock.lock()
+	cw.conn.writeLock.forceLock()
 	cw.conn.sendFrame(cw.buf)
 	cw.conn.raw.Close()
 }

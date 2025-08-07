@@ -39,7 +39,7 @@ func newMu(c *Conn) *mu {
 	return &mu{conn: c, ch: make(chan struct{}, 1)}
 }
 
-func (m *mu) lock() {
+func (m *mu) forceLock() {
 	m.ch <- struct{}{}
 }
 
@@ -58,7 +58,7 @@ func (m *mu) tryUnlock() bool {
 
 func (m *mu) lockCtx(ctx context.Context) error {
 	if ctx == nil || ctx.Done() == nil {
-		m.lock()
+		m.forceLock()
 		return nil
 	}
 
