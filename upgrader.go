@@ -32,20 +32,12 @@ func NewUpgrader(opts *Options) *Upgrader {
 	if !opts.DisableWriteBuffersPooling {
 		u.writePool = sync.Pool{
 			New: func() any {
-				return make([]byte, opts.WriteBufferSize)
+				return &PooledBuf{make([]byte, u.WriteBufferSize)}
 			},
 		}
 	}
 
 	return u
-}
-
-func (u *Upgrader) getWriteBuf() *PooledBuf {
-	if !u.DisableWriteBuffersPooling {
-		return u.writePool.Get().(*PooledBuf)
-	}
-
-	return &PooledBuf{make([]byte, u.WriteBufferSize)}
 }
 
 // Upgrades an HTTP connection to a Websocket connection.
