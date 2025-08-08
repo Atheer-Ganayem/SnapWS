@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-type BackpressureStrategy int
+// type BackpressureStrategy int
 
-const (
-	BackpressureClose BackpressureStrategy = iota
-	BackpressureDrop
-	BackpressureWait
-)
+// const (
+// 	BackpressureClose BackpressureStrategy = iota
+// 	BackpressureDrop
+// 	BackpressureWait
+// )
 
 const (
 	defaultWriteWait = time.Second * 5
@@ -80,7 +80,7 @@ type Options struct {
 	// 	until it succeeds to send the message.
 	//
 	// Note: when the inobundFrames channel is full, the connection will be closed.
-	BackpressureStrategy BackpressureStrategy
+	// BackpressureStrategy BackpressureStrategy
 
 	// SkipUTF8Validation disables UTF-8 validation for text frames.
 	// UTF-8 for text messages is required by RFC 6455.
@@ -107,23 +107,23 @@ func (opt *Options) WithDefault() {
 		opt.WriteBufferSize = DefaultWriteBufferSize
 	}
 
-	if !opt.BackpressureStrategy.Valid() {
-		opt.BackpressureStrategy = BackpressureClose
-	}
+	// if !opt.BackpressureStrategy.Valid() {
+	// 	opt.BackpressureStrategy = BackpressureClose
+	// }
 }
 
-func (s BackpressureStrategy) Valid() bool {
-	switch s {
-	case BackpressureClose:
-		return true
-	case BackpressureDrop:
-		return true
-	case BackpressureWait:
-		return true
-	default:
-		return false
-	}
-}
+// func (s BackpressureStrategy) Valid() bool {
+// 	switch s {
+// 	case BackpressureClose:
+// 		return true
+// 	case BackpressureDrop:
+// 		return true
+// 	case BackpressureWait:
+// 		return true
+// 	default:
+// 		return false
+// 	}
+// }
 
 type Middlwares []Middlware
 
