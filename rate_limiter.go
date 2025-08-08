@@ -6,15 +6,47 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// RateLimiter manages per-connection message rate limiting for WebSocket connections.
+// It uses a token bucket algorithm to limit the number of messages each connection
+// can send per second, with configurable burst capacity.
+//
+// The rate limiter operates on WebSocket messages (not frames), meaning:
+// - Only data frames (text/binary) count toward the limit
+// - Control frames (ping, pong, close) are ignored
+// - Fragmented messages count as a single message
+//
+// note: if you want to close the connection you must close it manually in
+// SetOnLimitExceeded and return a non-nil error.
+//
+// Example usage:
+//
+//	limiter := NewRateLimiter(10, 5) // 10 msg/sec, burst of 5
+//	limiter.SetOnLimitExceeded(func(conn *Conn) error {
+//	    log.Printf("Rate limit exceeded for connection %v", conn.RemoteAddr())
+//	    return nil // Don't close connection
+//	})
+//	upgrader.Limiter = limiter
 type RateLimiter struct {
+	// clients maps each connection to its individual rate limiter.
+	// Each connection gets its own token bucket with the same rate/burst settings.
 	clients map[*Conn]*rate.Limiter
-	mu      sync.RWMutex
-	// Number of message allowed per second
+	mu sync.RWMutex
+
+	// mps is the number of messages allowed per second for each connection
 	mps int
-	// Number of bursts allowed
+
+	// burst is the maximum number of messages that can be sent in a burst
+	// before rate limiting kicks in. This allows for brief spikes in traffic.
 	burst int
-	// Called when the user exceeds the limit.
-	// Important: if you close the connection you must return a non-nil error.
+
+	// onLimitExceeded is called when a connection exceeds its rate limit.
+	// The function receives the offending connection and can perform actions
+	// like logging, metrics collection, or closing the connection.
+	//
+	// Important: If this function closes the connection, it MUST return a
+	// non-nil error to signal that the connection should be terminated.
+	// Returning nil means the message should be dropped but the connection
+	// should remain open.
 	OnRateLimitHit func(conn *Conn) error
 }
 
