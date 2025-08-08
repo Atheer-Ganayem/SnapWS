@@ -26,7 +26,6 @@ type Conn struct {
 	// when the conn closes, the channel closes, so any go routine trying to read from it,
 	// would receive ok=false, indicating that the channel is closed => conn is closed.
 	done      chan struct{}
-	isClosed  atomic.Bool
 	closeOnce sync.Once
 	onClose   func()
 
@@ -179,9 +178,8 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 			conn.upgrader.writePool.Put(conn.writer.pb)
 		}
 
-		// close the done channel and set isClosed=true to prevent any reads and writes.
+		// close the done channel inditicating that the connection is closed
 		close(conn.done)
-		conn.isClosed.Store(true)
 
 		// writer a close frame.
 		conn.controlWriter.writeClose(code, reason)

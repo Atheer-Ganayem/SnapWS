@@ -65,9 +65,6 @@ func (w *ConnWriter) reset(ctx context.Context, opcode uint8) {
 // This mean its used when its trying to optain the next writer and flushing.
 // After you close the writer and call NextWriter again, you must give it a new context.
 func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, error) {
-	if conn.isClosed.Load() {
-		return nil, fatal(ErrConnClosed)
-	}
 	if conn.writer == nil {
 		return nil, ErrWriterUnintialized
 	}
@@ -128,9 +125,6 @@ func (w *ConnWriter) Write(p []byte) (n int, err error) {
 //   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
 //     positions have been reset.
 func (w *ConnWriter) Flush(FIN bool) error {
-	if w.conn.isClosed.Load() {
-		return fatal(ErrChannelClosed)
-	}
 	if w == nil {
 		return ErrWriterUnintialized
 	}

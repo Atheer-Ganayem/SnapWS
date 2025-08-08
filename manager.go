@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -131,11 +132,9 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedCon
 	defer m.Mu.RUnlock()
 
 	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
-	var n int
 	for k, v := range m.Conns {
 		if k != exclude {
 			conns = append(conns, v)
-			n++
 		}
 	}
 	return conns
@@ -151,8 +150,8 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 		ctx = context.TODO()
 	}
 
-	if opcode != OpcodeText && opcode != OpcodeBinary {
-		return 0, ErrInvalidOPCODE
+	if !isData(opcode) {
+		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
 	conns := m.GetAllConnsWithExclude(exclude)

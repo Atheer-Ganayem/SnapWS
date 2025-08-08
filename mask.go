@@ -6,7 +6,8 @@ import (
 )
 
 func (r *ConnReader) unMask(b []byte) {
-	r.unMaskStd(b)
+	r.unMaskGorilla(b)
+	// r.unMaskStd(b)
 }
 
 func (cw *ControlWriter) unMask(p []byte) {
@@ -15,9 +16,9 @@ func (cw *ControlWriter) unMask(p []byte) {
 	}
 }
 
-func (r *ConnReader) unMaskStd(p []byte) {
-	for i := range p {
-		p[i] = p[i] ^ r.maskKey[r.maskPos%4]
+func (r *ConnReader) unMaskStd(b []byte) {
+	for i := range b {
+		b[i] = b[i] ^ r.maskKey[r.maskPos%4]
 		r.maskPos++
 	}
 }
@@ -133,20 +134,20 @@ func (r *ConnReader) unMaskCoder(b []byte) {
 }
 
 // copied from gorilla/websocket, added it to test different masking methods
-func (r *ConnReader) unMaskGorilla(p []byte) {
+func (r *ConnReader) unMaskGorilla(b []byte) {
 	mask32 := uint32(r.maskKey[0]) |
 		uint32(r.maskKey[1])<<8 |
 		uint32(r.maskKey[2])<<16 |
 		uint32(r.maskKey[3])<<24
 
-	n := len(p)
+	n := len(b)
 	i := 0
 	for ; i+4 <= n; i += 4 {
-		v := *(*uint32)(unsafe.Pointer(&p[i]))
+		v := *(*uint32)(unsafe.Pointer(&b[i]))
 		v ^= mask32
-		*(*uint32)(unsafe.Pointer(&p[i])) = v
+		*(*uint32)(unsafe.Pointer(&b[i])) = v
 	}
 	for ; i < n; i++ {
-		p[i] ^= r.maskKey[i%4]
+		b[i] ^= r.maskKey[i%4]
 	}
 }

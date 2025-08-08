@@ -141,8 +141,10 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 // and the second return value indicates the message type (e.g., Text or Binary).
 // All errors return are of type snap.FatalError indicating that the error is fatal and the connection got closed.
 func (conn *Conn) NextReader() (io.Reader, uint8, error) {
-	if conn.isClosed.Load() {
+	select {
+	case <-conn.done:
 		return nil, 0, fatal(ErrConnClosed)
+	default:
 	}
 
 	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
@@ -235,10 +237,6 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 // ReadMessage reads the next complete WebSocket message into memory.
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
 func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
-	if conn.isClosed.Load() {
-		return nilOpcode, nil, fatal(ErrConnClosed)
-	}
-
 	reader, msgType, err := conn.NextReader()
 	if err != nil {
 		return nilOpcode, nil, err

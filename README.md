@@ -24,7 +24,7 @@ It takes care of ping/pong, close frames, connection safety, and lifecycle manag
 - ✅ Fully passes the [autobahn-testsuite](https://github.com/crossbario/autobahn-testsuite)
 - ✅ Automatic handling of ping/pong and close frames.
 - ✅ Written completely in standard library, no external libraries imported.
-- ✅ Connection management built-in (usefull when communicating between different clients like chat apps).
+- ✅ Connection management built-in (useful when communicating between different clients like chat apps).
 - ✅ Support for middlewares and connect/disconnect hooks.
 
 ---

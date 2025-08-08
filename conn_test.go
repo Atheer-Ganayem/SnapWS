@@ -1,588 +1,524 @@
 package snapws
 
-// import (
-// 	"bytes"
-// 	"context"
-// 	"errors"
-// 	"io"
-// 	"net"
-// 	"sync"
-// 	"testing"
-// 	"time"
-// )
-
-// // Mock net.Conn for testing
-// type mockConn struct {
-// 	readBuf    *bytes.Buffer
-// 	writeBuf   *bytes.Buffer
-// 	closed     bool
-// 	mu         sync.Mutex
-// 	allowReads bool
-// }
-
-// func newMockConn() *mockConn {
-// 	return &mockConn{
-// 		readBuf:  new(bytes.Buffer),
-// 		writeBuf: new(bytes.Buffer),
-// 	}
-// }
-
-// func (m *mockConn) Read(b []byte) (n int, err error) {
-// 	if !m.allowReads {
-// 		time.Sleep(time.Second / 2)
-// 	}
-// 	m.mu.Lock()
-// 	defer m.mu.Unlock()
-// 	if m.closed {
-// 		return 0, io.EOF
-// 	}
-// 	return m.readBuf.Read(b)
-// }
-
-// func (m *mockConn) Write(b []byte) (n int, err error) {
-// 	m.mu.Lock()
-// 	defer m.mu.Unlock()
-// 	if m.closed {
-// 		return 0, errors.New("connection closed")
-// 	}
-// 	return m.writeBuf.Write(b)
-// }
-
-// func (m *mockConn) Close() error {
-// 	m.mu.Lock()
-// 	defer m.mu.Unlock()
-// 	m.closed = true
-// 	return nil
-// }
-
-// func (m *mockConn) LocalAddr() net.Addr                { return &net.TCPAddr{} }
-// func (m *mockConn) RemoteAddr() net.Addr               { return &net.TCPAddr{} }
-// func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
-// func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
-// func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
-
-// func (m *mockConn) writeFrame(frame *frame) {
-// 	if !m.allowReads {
-// 		return
-// 	}
-// 	m.mu.Lock()
-// 	defer m.mu.Unlock()
-// 	m.readBuf.Write(frame.Encoded)
-// }
-
-// func createTestManager() *Manager[string] {
-// 	opts := &Options{
-// 		WriteWait:           time.Second,
-// 		ReadWait:            time.Second * 5,
-// 		PingEvery:           time.Second * 30,
-// 		MaxMessageSize:      1024,
-// 		ReadBufferSize:      256,
-// 		WriteBufferSize:     256,
-// 		InboundFramesSize:   10,
-// 		InboundMessagesSize: 5,
-// 		OutboundControlSize: 2,
-// 	}
-// 	return NewManager[string](NewUpgrader(opts))
-// }
-
-// func TestConnCreation(t *testing.T) {
-// 	manager := createTestManager()
-// 	mockConn := newMockConn()
-// 	c := manager.Upgrader.newConn(mockConn, "")
-// 	conn := manager.newManagedConn(c, "test-key")
-
-// 	if conn.Key != "test-key" {
-// 		t.Errorf("Key = %v, want %v", conn.Key, "test-key")
-// 	}
-// 	if conn.SubProtocol != "" {
-// 		t.Errorf("SubProtocol = %v, want empty", conn.SubProtocol)
-// 	}
-// 	if conn.Manager != manager {
-// 		t.Error("Manager not set correctly")
-// 	}
-// 	if conn.raw != mockConn {
-// 		t.Error("Raw connection not set correctly")
-// 	}
-// 	if conn.isClosed.Load() {
-// 		t.Error("Connection should not be closed initially")
-// 	}
-// }
-
-// func TestConnClose(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	// Test normal close
-// 	conn.Close()
-
-// 	if !conn.isClosed.Load() {
-// 		t.Error("Connection should be closed")
-// 	}
-
-// 	// Test multiple closes (should not panic)
-// 	conn.Close()
-// 	conn.Close()
-// }
-
-// func TestConnCloseWithCode(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	conn.CloseWithCode(CloseProtocolError, "test reason")
-
-// 	if !conn.isClosed.Load() {
-// 		t.Error("Connection should be closed")
-// 	}
-
-// 	// Verify close frame was written
-// 	if mockConn.writeBuf.Len() == 0 {
-// 		t.Error("Expected close frame to be written")
-// 	}
-// }
-
-// func TestConnCloseWithPayload(t *testing.T) {
-// 	tests := []struct {
-// 		name           string
-// 		payload        []byte
-// 		expectClose    bool
-// 		expectedCode   uint16
-// 		expectedReason string
-// 	}{
-// 		{
-// 			name:         "valid payload with reason",
-// 			payload:      append([]byte{0x03, 0xE8}, []byte("test reason")...), // 1000 + reason
-// 			expectClose:  true,
-// 			expectedCode: CloseNormalClosure,
-// 		},
-// 		{
-// 			name:        "valid payload without reason",
-// 			payload:     []byte{0x03, 0xE8}, // 1000
-// 			expectClose: true,
-// 		},
-// 		{
-// 			name:        "invalid payload too short",
-// 			payload:     []byte{0x03},
-// 			expectClose: true,
-// 		},
-// 		{
-// 			name:        "invalid close code",
-// 			payload:     []byte{0x04, 0xD2}, // 1234 (invalid)
-// 			expectClose: true,
-// 		},
-// 		{
-// 			name:        "invalid UTF-8 reason",
-// 			payload:     append([]byte{0x03, 0xE8}, []byte{0xFF, 0xFE}...),
-// 			expectClose: true,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			upgrader := NewUpgrader(nil)
-// 			mockConn := newMockConn()
-// 			conn := upgrader.newConn(mockConn, "")
-
-// 			conn.CloseWithPayload(tt.payload)
-
-// 			if tt.expectClose && !conn.isClosed.Load() {
-// 				t.Error("Connection should be closed")
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestConnWriter(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test NextWriter
-// 	writer, err := conn.NextWriter(ctx, OpcodeText)
-// 	if err != nil {
-// 		t.Fatalf("NextWriter failed: %v", err)
-// 	}
-// 	if writer == nil {
-// 		t.Fatal("Writer is nil")
-// 	}
-// 	if writer.opcode != OpcodeText {
-// 		t.Errorf("Writer opcode = %v, want %v", writer.opcode, OpcodeText)
-// 	}
-
-// 	// Test Write
-// 	data := []byte("hello world")
-// 	n, err := writer.Write(data)
-// 	if err != nil {
-// 		t.Errorf("Write failed: %v", err)
-// 	}
-// 	if n != len(data) {
-// 		t.Errorf("Write returned %v bytes, want %v", n, len(data))
-// 	}
-
-// 	// Test Close
-// 	err = writer.Close()
-// 	if err != nil {
-// 		t.Errorf("Close failed: %v", err)
-// 	}
-// 	if !writer.closed {
-// 		t.Error("Writer should be closed")
-// 	}
-// }
-
-// func TestConnWriterInvalidOpcode(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	_, err := conn.NextWriter(ctx, OpcodePing) // Invalid for NextWriter
-// 	if err == nil {
-// 		t.Error("Expected error for invalid opcode")
-// 	}
-// }
-
-// func TestConnWriterFlush(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-// 	writer, err := conn.NextWriter(ctx, OpcodeText)
-// 	if err != nil {
-// 		t.Errorf("Writer failed: %v", err)
-// 	}
-
-// 	// Write some data
-// 	_, err = writer.Write([]byte("test"))
-// 	if err != nil {
-// 		t.Errorf("Write failed: %v", err)
-// 	}
-
-// 	// Test flush without FIN
-// 	err = writer.Flush(false)
-// 	if err != nil {
-// 		t.Errorf("Flush failed: %v", err)
-// 	}
-
-// 	// Write more data
-// 	_, err = writer.Write([]byte("data"))
-// 	if err != nil {
-// 		t.Errorf("Write failed: %v", err)
-// 	}
-
-// 	// Test flush with FIN
-// 	err = writer.Flush(true)
-// 	if err != nil {
-// 		t.Errorf("Final flush failed: %v", err)
-// 	}
-
-// 	writer.Close()
-// }
-
-// func TestSendBytes(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-// 	data := []byte{1, 2, 3, 4, 5}
-
-// 	// Test successful send
-// 	err := conn.SendBytes(ctx, data)
-// 	if err != nil {
-// 		t.Errorf("SendBytes failed: %v", err)
-// 	}
-
-// 	// Test empty payload
-// 	err = conn.SendBytes(ctx, []byte{})
-// 	if err == nil {
-// 		t.Error("Expected error for empty payload")
-// 	}
-// }
-
-// func TestSendString(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-// 	data := []byte("hello world")
-
-// 	// Test successful send
-// 	err := conn.SendString(ctx, data)
-// 	if err != nil {
-// 		t.Errorf("SendString failed: %v", err)
-// 	}
-
-// 	// Test empty payload
-// 	err = conn.SendString(ctx, []byte{})
-// 	if err == nil {
-// 		t.Error("Expected error for empty payload")
-// 	}
-
-// 	// Test invalid UTF-8
-// 	err = conn.SendString(ctx, []byte{0xFF, 0xFE})
-// 	if err == nil {
-// 		t.Error("Expected error for invalid UTF-8")
-// 	}
-// }
-
-// func TestSendJSON(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test successful send
-// 	data := map[string]interface{}{
-// 		"message": "hello",
-// 		"count":   42,
-// 	}
-// 	err := conn.SendJSON(ctx, data)
-// 	if err != nil {
-// 		t.Errorf("SendJSON failed: %v", err)
-// 	}
-
-// 	// Test nil payload
-// 	err = conn.SendJSON(ctx, nil)
-// 	if err == nil {
-// 		t.Error("Expected error for nil payload")
-// 	}
-// }
-
-// func TestPingPong(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	// Test Ping
-// 	err := conn.Ping()
-// 	if err != nil {
-// 		t.Errorf("Ping failed: %v", err)
-// 	}
-
-// 	// Test Pong
-// 	payload := []byte("pong data")
-// 	conn.Pong(payload) // Should not panic or error
-// }
-
-// func TestConnReader(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	// Create a test message
-// 	testData := []byte("hello world")
-// 	message := &message{
-// 		OPCODE:  OpcodeText,
-// 		Payload: bytes.NewBuffer(testData),
-// 	}
-
-// 	// Set up reader
-// 	reader := &ConnReader{
-// 		conn:    conn,
-// 		message: message,
-// 		eof:     false,
-// 	}
-
-// 	// Test Read
-// 	buf := make([]byte, 5)
-// 	n, err := reader.Read(buf)
-// 	if err != nil {
-// 		t.Errorf("Read failed: %v", err)
-// 	}
-// 	if n != 5 {
-// 		t.Errorf("Read returned %v bytes, want 5", n)
-// 	}
-// 	if string(buf) != "hello" {
-// 		t.Errorf("Read data = %s, want hello", string(buf))
-// 	}
-
-// 	// Test reading rest
-// 	buf = make([]byte, 10)
-// 	n, err = reader.Read(buf)
-// 	if err != nil {
-// 		t.Errorf("Read failed: %v", err)
-// 	}
-// 	if n != 6 {
-// 		t.Errorf("Read returned %v bytes, want 6", n)
-// 	}
-// 	if string(buf[:n]) != " world" {
-// 		t.Errorf("Read data = %s, want ' world'", string(buf[:n]))
-// 	}
-
-// 	// Test EOF
-// 	n, err = reader.Read(buf)
-// 	if err != io.EOF {
-// 		t.Errorf("Expected EOF, got %v", err)
-// 	}
-// 	if n != 0 {
-// 		t.Errorf("Read returned %v bytes, want 0", n)
-// 	}
-// }
-
-// func TestConnReaderPayload(t *testing.T) {
-// 	testData := []byte("test payload")
-// 	message := &message{
-// 		OPCODE:  OpcodeText,
-// 		Payload: bytes.NewBuffer(testData),
-// 	}
-
-// 	reader := &ConnReader{
-// 		message: message,
-// 	}
-
-// 	payload := reader.Payload()
-// 	if !bytes.Equal(payload, testData) {
-// 		t.Errorf("Payload = %v, want %v", payload, testData)
-// 	}
-// }
-
-// func TestReadMessage(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	// Test with closed connection
-// 	conn.isClosed.Store(true)
-// 	ctx := context.Background()
-
-// 	_, _, err := conn.ReadMessage(ctx)
-// 	if err == nil {
-// 		t.Error("Expected error for closed connection")
-// 	}
-// }
-
-// func TestReadBinary(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test with closed connection
-// 	conn.isClosed.Store(true)
-// 	_, err := conn.ReadBinary(ctx)
-// 	if err == nil {
-// 		t.Error("Expected error for closed connection")
-// 	}
-// }
-
-// func TestReadString(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test with closed connection
-// 	conn.isClosed.Store(true)
-// 	_, err := conn.ReadString(ctx)
-// 	if err == nil {
-// 		t.Error("Expected error for closed connection")
-// 	}
-// }
-
-// func TestReadJSON(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test with closed connection
-// 	conn.isClosed.Store(true)
-// 	var result map[string]interface{}
-// 	err := conn.ReadJSON(ctx, &result)
-// 	if err == nil {
-// 		t.Error("Expected error for closed connection")
-// 	}
-// }
-
-// func TestWriteHeaders(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-// 	writer, _ := conn.NextWriter(ctx, OpcodeText)
-
-// 	// Write some data first
-// 	writer.Write([]byte("test"))
-
-// 	// Test writeHeaders
-// 	err := writer.writeHeaders(true, OpcodeText)
-// 	if err != nil {
-// 		t.Errorf("writeHeaders failed: %v", err)
-// 	}
-
-// 	writer.Close()
-// }
-
-// func TestLockUnlockW(t *testing.T) {
-// 	upgrader := NewUpgrader(nil)
-// 	mockConn := newMockConn()
-// 	conn := upgrader.newConn(mockConn, "")
-
-// 	ctx := context.Background()
-
-// 	// Test successful lock
-// 	err := conn.lockW(ctx)
-// 	if err != nil {
-// 		t.Errorf("lockW failed: %v", err)
-// 	}
-
-// 	// Test unlock
-// 	err = conn.unlockW()
-// 	if err != nil {
-// 		t.Errorf("unlockW failed: %v", err)
-// 	}
-
-// 	// Test double unlock (should not error)
-// 	err = conn.unlockW()
-// 	if err != nil {
-// 		t.Errorf("Double unlockW failed: %v", err)
-// 	}
-// }
-
-// func TestSendMessageToChan(t *testing.T) {
-// 	tests := []struct {
-// 		name     string
-// 		strategy BackpressureStrategy
-// 	}{
-// 		{"BackpressureClose", BackpressureClose},
-// 		{"BackpressureDrop", BackpressureDrop},
-// 		// {"BackpressureWait", BackpressureWait},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			opts := &Options{
-// 				BackpressureStrategy: tt.strategy,
-// 				InboundMessagesSize:  1,
-// 			}
-// 			upgrader := NewUpgrader(opts)
-// 			mockConn := newMockConn()
-// 			conn := upgrader.newConn(mockConn, "")
-
-// 			message := &message{
-// 				OPCODE:  OpcodeText,
-// 				Payload: bytes.NewBufferString("test"),
-// 			}
-
-// 			// Fill the channel first
-// 			conn.inboundMessages <- message
-
-// 			// This should trigger backpressure handling
-// 			conn.sendMessageToChan(message)
-
-// 			// Clean up
-// 			<-conn.inboundMessages
-// 		})
-// 	}
-// }
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"io"
+	"net"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+	"unicode/utf8"
+)
+
+// Mock connection for testing
+type mockConn struct {
+	readBuf  *bytes.Buffer
+	writeBuf *bytes.Buffer
+	closed   atomic.Bool
+	mu       sync.Mutex
+}
+
+func newMockConn() *mockConn {
+	return &mockConn{
+		readBuf:  bytes.NewBuffer(nil),
+		writeBuf: bytes.NewBuffer(nil),
+	}
+}
+
+func (m *mockConn) Read(b []byte) (n int, err error) {
+	if m.closed.Load() {
+		return 0, io.EOF
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.readBuf.Read(b)
+}
+
+func (m *mockConn) Write(b []byte) (n int, err error) {
+	if m.closed.Load() {
+		return 0, io.ErrClosedPipe
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.writeBuf.Write(b)
+}
+
+func (m *mockConn) Close() error {
+	m.closed.Store(true)
+	return nil
+}
+
+func (m *mockConn) LocalAddr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080} }
+func (m *mockConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+}
+func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
+func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
+
+// Helper to create a test connection
+func createTestConn() *Conn {
+	upgrader := NewUpgrader(&Options{
+		WriteWait:       time.Second,
+		ReadWait:        time.Second,
+		PingEvery:       time.Second * 30,
+		MaxMessageSize:  1024 * 1024,
+		WriteBufferSize: 4096,
+	})
+
+	mockConn := newMockConn()
+	br := bufio.NewReader(mockConn)
+
+	return upgrader.newConn(mockConn, "", br, make([]byte, 0, 4096))
+}
+
+// Test basic connection creation and properties
+func TestConn_Creation(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	if conn == nil {
+		t.Fatal("Expected non-nil connection")
+	}
+
+	if !conn.isServer {
+		t.Error("Expected isServer to be true")
+	}
+
+	if conn.SubProtocol != "" {
+		t.Errorf("Expected empty subprotocol, got %s", conn.SubProtocol)
+	}
+
+	select {
+	case <-conn.done:
+		t.Error("Expected connection to not be closed initially")
+	default:
+	}
+}
+
+// Test connection close
+func TestConn_Close(t *testing.T) {
+	conn := createTestConn()
+
+	select {
+	case <-conn.done:
+		t.Error("Expected connection to not be closed initially")
+	default:
+	}
+	conn.Close()
+	select {
+	case <-conn.done:
+	default:
+		t.Error("Expected connection to not be closed initially")
+	}
+}
+
+// Test CloseWithCode
+func TestConn_CloseWithCode(t *testing.T) {
+	conn := createTestConn()
+
+	conn.CloseWithCode(CloseNormalClosure, "test close")
+
+	select {
+	case <-conn.done:
+	default:
+		t.Error("Expected connection to not be closed initially")
+	}
+
+	// Ensure multiple closes don't panic
+	conn.CloseWithCode(CloseGoingAway, "second close")
+	conn.Close()
+}
+
+// Test NextWriter basic functionality
+func TestConn_NextWriter(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	// Test getting a text writer
+	writer, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Fatalf("Expected no error getting writer, got %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Expected non-nil writer")
+	}
+
+	if writer.opcode != OpcodeText {
+		t.Errorf("Expected opcode %d, got %d", OpcodeText, writer.opcode)
+	}
+
+	if writer.closed {
+		t.Error("Expected writer to not be closed")
+	}
+
+	// Close the writer
+	err = writer.Close()
+	if err != nil {
+		t.Errorf("Expected no error closing writer, got %v", err)
+	}
+
+	if !writer.closed {
+		t.Error("Expected writer to be closed after Close()")
+	}
+}
+
+// Test NextWriter with invalid opcode
+func TestConn_NextWriter_InvalidOpcode(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	// Test with control frame opcode (should fail)
+	_, err := conn.NextWriter(ctx, OpcodeClose)
+	if err == nil {
+		t.Error("Expected error with control frame opcode")
+	}
+
+	// Test with invalid opcode
+	_, err = conn.NextWriter(ctx, 255)
+	if err == nil {
+		t.Error("Expected error with invalid opcode")
+	}
+}
+
+// Test Writer Write functionality
+func TestConnWriter_Write(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+	writer, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Fatalf("Failed to get writer: %v", err)
+	}
+	defer writer.Close()
+
+	data := []byte("Hello, WebSocket!")
+	n, err := writer.Write(data)
+	if err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	if n != len(data) {
+		t.Errorf("Expected to write %d bytes, wrote %d", len(data), n)
+	}
+
+	// Test writing to closed writer
+	writer.Close()
+	_, err = writer.Write([]byte("should fail"))
+	if err == nil {
+		t.Error("Expected error writing to closed writer")
+	}
+}
+
+// Test SendMessage
+func TestConn_SendMessage(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	// Test text message
+	err := conn.SendMessage(ctx, OpcodeText, []byte("Hello"))
+	if err != nil {
+		t.Errorf("Failed to send text message: %v", err)
+	}
+
+	// Test binary message
+	err = conn.SendMessage(ctx, OpcodeBinary, []byte{0x01, 0x02, 0x03})
+	if err != nil {
+		t.Errorf("Failed to send binary message: %v", err)
+	}
+
+	// Test with invalid opcode
+	err = conn.SendMessage(ctx, OpcodeClose, []byte("invalid"))
+	if err == nil {
+		t.Error("Expected error with control frame opcode")
+	}
+}
+
+// Test SendBytes and SendString
+func TestConn_SendBytesAndString(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	// Test SendBytes
+	err := conn.SendBytes(ctx, []byte{0x01, 0x02, 0x03})
+	if err != nil {
+		t.Errorf("Failed to send bytes: %v", err)
+	}
+
+	// Test SendString with valid UTF-8
+	err = conn.SendString(ctx, []byte("Hello, 世界!"))
+	if err != nil {
+		t.Errorf("Failed to send string: %v", err)
+	}
+}
+
+// Test SendJSON
+func TestConn_SendJSON(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	// Test with valid JSON data
+	data := map[string]interface{}{
+		"message": "hello",
+		"count":   42,
+		"items":   []string{"a", "b", "c"},
+	}
+
+	err := conn.SendJSON(ctx, data)
+	if err != nil {
+		t.Errorf("Failed to send JSON: %v", err)
+	}
+
+	// Test with invalid JSON (should fail during encoding, not during send)
+	invalidData := make(chan int) // channels can't be marshaled to JSON
+	err = conn.SendJSON(ctx, invalidData)
+	if err == nil {
+		t.Error("Expected error with invalid JSON data")
+	}
+}
+
+// Test UTF-8 validation
+func TestConn_UTF8Validation(t *testing.T) {
+	// Test with validation enabled
+	upgrader := NewUpgrader(&Options{
+		SkipUTF8Validation: false,
+		WriteWait:          time.Second,
+		ReadWait:           time.Second,
+	})
+
+	mockConn := newMockConn()
+	br := bufio.NewReader(mockConn)
+	conn := upgrader.newConn(mockConn, "", br, make([]byte, 0, 4096))
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	// Valid UTF-8 should work
+	err := conn.SendString(ctx, []byte("Hello, 世界!"))
+	if err != nil {
+		t.Errorf("Valid UTF-8 should not fail: %v", err)
+	}
+
+	// Invalid UTF-8 should fail
+	invalidUTF8 := []byte{0xFF, 0xFE, 0xFD}
+	err = conn.SendString(ctx, invalidUTF8)
+	if err == nil {
+		t.Error("Invalid UTF-8 should fail validation")
+	}
+
+	// Test with validation disabled
+	upgrader.SkipUTF8Validation = true
+	mockConn2 := newMockConn()
+	br2 := bufio.NewReader(mockConn2)
+	conn2 := upgrader.newConn(mockConn2, "", br2, make([]byte, 0, 4096))
+	defer conn2.Close()
+
+	err = conn2.SendString(ctx, invalidUTF8)
+	if err != nil {
+		t.Errorf("Invalid UTF-8 should pass when validation is disabled: %v", err)
+	}
+}
+
+// Test connection metadata
+func TestConn_MetaData(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	// Test setting and getting metadata
+	conn.MetaData.Store("user_id", "12345")
+	conn.MetaData.Store("session", map[string]string{"role": "admin"})
+
+	userID, ok := conn.MetaData.Load("user_id")
+	if !ok {
+		t.Error("Expected to find user_id in metadata")
+	}
+	if userID != "12345" {
+		t.Errorf("Expected user_id to be '12345', got %v", userID)
+	}
+
+	session, ok := conn.MetaData.Load("session")
+	if !ok {
+		t.Error("Expected to find session in metadata")
+	}
+	sessionMap, ok := session.(map[string]string)
+	if !ok {
+		t.Error("Expected session to be map[string]string")
+	}
+	if sessionMap["role"] != "admin" {
+		t.Errorf("Expected role to be 'admin', got %s", sessionMap["role"])
+	}
+
+	// Test non-existent key
+	_, ok = conn.MetaData.Load("non_existent")
+	if ok {
+		t.Error("Expected non-existent key to not be found")
+	}
+}
+
+// Test NetConn method
+func TestConn_NetConn(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	netConn := conn.NetConn()
+	if netConn == nil {
+		t.Error("Expected non-nil net.Conn")
+	}
+
+	// Test that it's the same underlying connection
+	if netConn != conn.raw {
+		t.Error("NetConn() should return the same connection as conn.raw")
+	}
+}
+
+// Test concurrent writer access (should fail)
+func TestConn_ConcurrentWriterAccess(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+
+	writer1, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Fatalf("Failed to get first writer: %v", err)
+	}
+
+	// Try to get another writer while first is still active
+	ctx2, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = conn.NextWriter(ctx2, OpcodeText)
+	if err == nil {
+		t.Error("Expected error when trying to get concurrent writers")
+	}
+
+	// Close first writer
+	writer1.Close()
+
+	// Now getting a new writer should work
+	writer2, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Errorf("Should be able to get writer after closing previous one: %v", err)
+	}
+	writer2.Close()
+}
+
+// Test writer buffer management
+func TestConnWriter_BufferManagement(t *testing.T) {
+	conn := createTestConn()
+	defer conn.Close()
+
+	ctx := context.Background()
+	writer, err := conn.NextWriter(ctx, OpcodeText)
+	if err != nil {
+		t.Fatalf("Failed to get writer: %v", err)
+	}
+	defer writer.Close()
+
+	// Write data that should fill buffer and trigger flush
+	largeData := make([]byte, conn.upgrader.WriteBufferSize*2)
+	for i := range largeData {
+		largeData[i] = 'A'
+	}
+
+	n, err := writer.Write(largeData)
+	if err != nil {
+		t.Errorf("Failed to write large data: %v", err)
+	}
+
+	if n != len(largeData) {
+		t.Errorf("Expected to write %d bytes, wrote %d", len(largeData), n)
+	}
+}
+
+// Test close codes validation
+func TestConn_CloseCodeValidation(t *testing.T) {
+	// Test with valid close codes
+	validCodes := []uint16{
+		CloseNormalClosure,
+		CloseGoingAway,
+		CloseProtocolError,
+		CloseUnsupportedData,
+		CloseInvalidFramePayloadData,
+		ClosePolicyViolation,
+		CloseMessageTooBig,
+		CloseMandatoryExtension,
+		CloseInternalServerErr,
+	}
+
+	for _, code := range validCodes {
+		conn := createTestConn()
+		conn.CloseWithCode(code, "test")
+		select {
+		case <-conn.done:
+		default:
+			t.Error("Expected connection to not be closed initially")
+		}
+	}
+}
+
+// Test ManagedConn
+func TestManagedConn(t *testing.T) {
+	manager := NewManager[string](nil)
+	conn := createTestConn()
+	key := "test_key"
+
+	managedConn := manager.newManagedConn(conn, key)
+
+	if managedConn.Key != key {
+		t.Errorf("Expected key %s, got %s", key, managedConn.Key)
+	}
+
+	if managedConn.Manager != manager {
+		t.Error("Expected manager to be set correctly")
+	}
+
+	if managedConn.Conn != conn {
+		t.Error("Expected conn to be set correctly")
+	}
+}
+
+// Test helpers
+func TestHelpers(t *testing.T) {
+	// Test comparePayload
+	p1 := []byte("hello")
+	p2 := []byte("hello")
+	p3 := []byte("world")
+
+	if !comparePayload(p1, p2) {
+		t.Error("Expected identical payloads to be equal")
+	}
+
+	if comparePayload(p1, p3) {
+		t.Error("Expected different payloads to not be equal")
+	}
+
+	// Test UTF-8 validation
+	validUTF8 := []byte("Hello, 世界!")
+	invalidUTF8 := []byte{0xFF, 0xFE, 0xFD}
+
+	if !utf8.Valid(validUTF8) {
+		t.Error("Expected valid UTF-8 to pass validation")
+	}
+
+	if utf8.Valid(invalidUTF8) {
+		t.Error("Expected invalid UTF-8 to fail validation")
+	}
+}

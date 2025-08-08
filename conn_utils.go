@@ -39,6 +39,15 @@ func newMu(c *Conn) *mu {
 	return &mu{conn: c, ch: make(chan struct{}, 1)}
 }
 
+func (m *mu) lock() error {
+	select {
+	case <-m.conn.done:
+		return fatal(ErrConnClosed)
+	case m.ch <- struct{}{}:
+		return nil
+	}
+}
+
 func (m *mu) forceLock() {
 	m.ch <- struct{}{}
 }
@@ -58,8 +67,7 @@ func (m *mu) tryUnlock() bool {
 
 func (m *mu) lockCtx(ctx context.Context) error {
 	if ctx == nil || ctx.Done() == nil {
-		m.forceLock()
-		return nil
+		return m.lock()
 	}
 
 	select {
