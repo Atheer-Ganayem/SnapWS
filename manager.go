@@ -17,6 +17,7 @@ import (
 //   - Manager provides safe fetch/add/remove of connections without requiring
 //     additional synchronization in user code.
 //   - Thread-safety is enforced with sync.RWMutex (expect some performance overhead).
+// 	 - Broadcast messages.
 //
 // The Upgrader field handles the WebSocket upgrade, and the optional
 // OnRegister / OnUnregister callbacks are invoked when connections are added or removed.
