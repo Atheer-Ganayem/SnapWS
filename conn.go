@@ -62,7 +62,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb 
 		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
 	}
 
-	conn.reader = ConnReader{conn: conn}
+	conn.reader = ConnReader{conn: conn, overflowOpcode: OpcodeContinuation}
 	conn.writer = conn.newWriter(OpcodeText, wb)
 	conn.controlWriter = conn.newControlWriter()
 

@@ -107,3 +107,30 @@ func (conn *Conn) allow() (bool, error) {
 	}
 	return true, nil
 }
+
+func (conn *Conn) skipRestOfMessage() error {
+	if _, err := conn.reader.conn.readBuf.Discard(conn.reader.remaining); err != nil {
+		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+		return err
+	}
+	for !conn.reader.fin {
+		opcode, err := conn.acceptFrame()
+		if err != nil {
+			return err
+		}
+
+		if isData(opcode) {
+			conn.reader.overflowOpcode = opcode
+			conn.reader.fragments = 0
+			conn.reader.totalSize = conn.reader.remaining
+			return nil
+		} else if opcode == OpcodeContinuation {
+			if _, err := conn.readBuf.Discard(conn.reader.remaining); err != nil {
+				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+				return err
+			}
+		}
+	}
+
+	return nil
+}

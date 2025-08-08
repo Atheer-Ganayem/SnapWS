@@ -27,6 +27,9 @@ type ConnReader struct {
 	maskKey   [4]byte
 	maskPos   int
 	remaining int
+
+	// look at skipRestOfMessage function in conn_util.go
+	overflowOpcode uint8
 }
 
 // acceptFrame reads and parses a single WebSocket frame.
@@ -148,6 +151,10 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	default:
 	}
 
+	if isData(conn.reader.overflowOpcode) {
+		return &conn.reader, conn.reader.overflowOpcode, nil
+	}
+
 	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
 	if err != nil {
 		conn.CloseWithCode(CloseInternalServerErr, "timeout")
@@ -158,21 +165,25 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	if err != nil {
 		return nil, 0, fatal(err)
 	}
+	conn.reader.overflowOpcode = OpcodeContinuation
 
 	if !isData(opcode) {
 		conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 		return nil, 0, fatal(ErrInvalidOPCODE)
 	}
 
+	conn.reader.fragments = 0
+	conn.reader.totalSize = conn.reader.remaining
+
 	ok, err := conn.allow()
 	if err != nil {
 		return nil, 0, fatal(err)
 	} else if !ok {
+		if err := conn.skipRestOfMessage(); err != nil {
+			return nil, 0, fatal(err)
+		}
 		return nil, 0, errors.New("rate limited")
 	}
-
-	conn.reader.fragments = 0
-	conn.reader.totalSize = conn.reader.remaining
 
 	return &conn.reader, opcode, nil
 }
