@@ -191,6 +191,11 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		if conn.onClose != nil {
 			conn.onClose()
 		}
+
+		// remove from rate limiter if exists
+		if conn.upgrader.Limiter != nil {
+			conn.upgrader.Limiter.removeClient(conn)
+		}
 	})
 }
 

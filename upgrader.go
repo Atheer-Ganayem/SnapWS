@@ -16,6 +16,7 @@ const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 type Upgrader struct {
 	*Options
 	writePool sync.Pool
+	Limiter   *RateLimiter
 }
 
 // Created a new upgrader with the given options.
@@ -122,6 +123,10 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 	conn := u.newConn(c, subProtocol, brw.Reader, p)
 	if u.OnConnect != nil {
 		u.OnConnect(conn)
+	}
+
+	if u.Limiter != nil {
+		u.Limiter.addClient(conn)
 	}
 
 	return conn, err

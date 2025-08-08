@@ -94,3 +94,16 @@ func (m *mu) lockTimer(t *time.Timer) error {
 func comparePayload(p1 []byte, p2 []byte) bool {
 	return bytes.Equal(p1, p2)
 }
+
+// bool: if is limited return true if not returns false.
+// error: the error from the onLimitExceeded hook.
+func (conn *Conn) allow() (bool, error) {
+	if conn.upgrader.Limiter != nil && !conn.upgrader.Limiter.allow(conn) {
+		if conn.upgrader.Limiter.OnRateLimitHit != nil {
+			err := conn.upgrader.Limiter.OnRateLimitHit(conn)
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
+}

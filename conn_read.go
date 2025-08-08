@@ -3,6 +3,7 @@ package snapws
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"time"
@@ -161,6 +162,13 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	if !isData(opcode) {
 		conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
 		return nil, 0, fatal(ErrInvalidOPCODE)
+	}
+
+	ok, err := conn.allow()
+	if err != nil {
+		return nil, 0, fatal(err)
+	} else if !ok {
+		return nil, 0, errors.New("rate limited")
 	}
 
 	conn.reader.fragments = 0
