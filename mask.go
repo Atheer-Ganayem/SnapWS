@@ -5,27 +5,66 @@ import (
 	"unsafe"
 )
 
+func mask(b []byte, key []byte, pos int) int {
+	return maskGorilla(b, key, pos)
+}
+
 func (r *ConnReader) unMask(b []byte) {
-	r.unMaskGorilla(b)
-	// r.unMaskStd(b)
+	newpos := mask(b, r.maskKey[:], r.maskPos)
+	r.maskPos = newpos % 4
 }
 
-func (cw *ControlWriter) unMask(p []byte) {
-	for i := range p {
-		p[i] = p[i] ^ cw.maskKey[i%4]
-	}
+func (cw *ControlWriter) unMask(b []byte) {
+	_ = mask(b, cw.maskKey[:], 0)
 }
 
-func (r *ConnReader) unMaskStd(b []byte) {
-	for i := range b {
-		b[i] = b[i] ^ r.maskKey[r.maskPos%4]
-		r.maskPos++
+func maskGorilla(b []byte, key []byte, pos int) int {
+	if len(b) == 0 {
+		return 0
 	}
+
+	i := 0
+	n := len(b)
+
+	// Handle unaligned start bytes
+	for (pos+i)%4 != 0 && i < n {
+		b[i] ^= key[(pos+i)%4]
+		i++
+	}
+
+	// Create 32-bit mask to mask in chuncks
+	mask32 := uint32(key[0]) |
+		uint32(key[1])<<8 |
+		uint32(key[2])<<16 |
+		uint32(key[3])<<24
+
+	// Process 4 bytes at a time
+	for i+4 <= n {
+		v := *(*uint32)(unsafe.Pointer(&b[i]))
+		v ^= mask32
+		*(*uint32)(unsafe.Pointer(&b[i])) = v
+		i += 4
+	}
+
+	// Handle remaining bytes
+	for i < n {
+		b[i] ^= key[(pos+i)%4]
+		i++
+	}
+
+	return pos + len(b) // Return new position
+}
+
+func maskSafe(b []byte, key [4]byte, pos int) int {
+	for i := 0; i < len(b); i++ {
+		b[i] ^= key[(pos+i)%4]
+	}
+	return pos + len(b)
 }
 
 // copied from Coder/websocket, added it to test different masking methods
-func (r *ConnReader) unMaskCoder(b []byte) {
-	key := binary.BigEndian.Uint32(r.maskKey[:])
+func unMaskCoder(b []byte, maskKey [4]byte) {
+	key := binary.BigEndian.Uint32(maskKey[:])
 	if len(b) >= 8 {
 		key64 := uint64(key)<<32 | uint64(key)
 
@@ -130,24 +169,5 @@ func (r *ConnReader) unMaskCoder(b []byte) {
 	// xor remaining bytes.
 	for i := range b {
 		b[i] ^= byte(key)
-	}
-}
-
-// copied from gorilla/websocket, added it to test different masking methods
-func (r *ConnReader) unMaskGorilla(b []byte) {
-	mask32 := uint32(r.maskKey[0]) |
-		uint32(r.maskKey[1])<<8 |
-		uint32(r.maskKey[2])<<16 |
-		uint32(r.maskKey[3])<<24
-
-	n := len(b)
-	i := 0
-	for ; i+4 <= n; i += 4 {
-		v := *(*uint32)(unsafe.Pointer(&b[i]))
-		v ^= mask32
-		*(*uint32)(unsafe.Pointer(&b[i])) = v
-	}
-	for ; i < n; i++ {
-		b[i] ^= r.maskKey[i%4]
 	}
 }

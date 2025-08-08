@@ -1,6 +1,7 @@
 package snapws
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"math"
 	"slices"
@@ -35,10 +36,18 @@ const MaxHeaderSize = 14
 const MaxControlFramePayload = 125
 
 // Write the frame header to a ConnWriter, must have at least 14 empty bytes at the begining.
-// Note: it doesnt supporting writing masking key, will support later.
 func (w *ConnWriter) writeHeaders(FIN bool, OPCODE uint8) error {
 	if w.start < 14 {
 		return ErrInsufficientHeaderSpace
+	}
+
+	if !w.conn.isServer {
+		_, err := rand.Read(w.buf[w.start-4 : w.start])
+		if err != nil {
+			return err
+		}
+		mask(w.buf[w.start:w.used], w.buf[w.start-4:w.start], 0)
+		w.start -= 4
 	}
 
 	payloadLength := w.used - w.start

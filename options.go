@@ -48,7 +48,7 @@ type Options struct {
 	ReaderMaxFragments int
 	// if not set it will use the default http buffer (4kb)
 	ReadBufferSize int
-	// if not set it will default to DefaultWriteBufferSize (4kb)
+	// if not set it will use the default http buffer (4kb)
 	WriteBufferSize int
 
 	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
