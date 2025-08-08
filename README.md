@@ -92,6 +92,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 For the benchmark i used [lesismal/go-websocket-benchmark](https://github.com/lesismal/go-websocket-benchmark)
 
+20250808 09:59.58.934 [Connections] Report
 
 |    Framework     |  TPS  | Min  |   Avg   |   Max    | TP50 | TP75  |   TP90   |   TP95   |   TP99   |   Used   | Total | Success | Failed | Concurrency |
 |     ---          |  ---  | ---  |   ---   |   ---    | ---  |  ---  |   ---    |   ---    |   ---    |   ---    |  ---  |   ---   |  ---   |     ---     |
