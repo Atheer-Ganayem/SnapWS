@@ -248,7 +248,7 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 		}
 
 		if r.isMasked {
-			r.unMask(p[n-rn : n])
+			r.mask(p[n-rn : n])
 		}
 	}
 }

@@ -314,7 +314,7 @@ func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 		}
 		cw.buf[1] = byte(n)
 
-		cw.unMask(payload)
+		cw.mask(payload)
 		cw.buf = append(cw.buf, payload...)
 	}
 

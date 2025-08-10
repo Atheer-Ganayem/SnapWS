@@ -17,7 +17,7 @@ import (
 //   - Manager provides safe fetch/add/remove of connections without requiring
 //     additional synchronization in user code.
 //   - Thread-safety is enforced with sync.RWMutex (expect some performance overhead).
-// 	 - Broadcast messages.
+//   - Broadcast messages.
 //
 // The Upgrader field handles the WebSocket upgrade, and the optional
 // OnRegister / OnUnregister callbacks are invoked when connections are added or removed.
@@ -47,12 +47,11 @@ func NewManager[KeyType comparable](u *Upgrader) *Manager[KeyType] {
 }
 
 // Connect does 3 things:
-//   - websocket handshake & runs the middlewares defined in upgrader options.
-//   - connect the user to the manager & runs the onConnect & onRegister hooks.
-//   - runs the connection loops (listeners, pingers, etc...)
+//   - Upgrades the connection.
+//   - connect the user to the manager & runs the hooks.
 //
 // Any error retuened by this method is a handhshake error, and the response is handled by the handshake.
-// You shouln't write to the writer after this fucntion is called even if it return a non-nil error.
+// You shouln't write to the http writer after this fucntion is called even if it return a non-nil error.
 func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.Request) (*ManagedConn[KeyType], error) {
 	c, err := m.Upgrader.Upgrade(w, r)
 	if err != nil {

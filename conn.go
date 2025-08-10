@@ -145,7 +145,7 @@ func (conn *Conn) handlePong(n int, isMasked bool) error {
 			return fatal(err)
 		}
 
-		conn.controlWriter.unMask(p)
+		conn.controlWriter.mask(p)
 		if ok := comparePayload(conn.pingPayload[:], p); !ok {
 			conn.CloseWithCode(CloseProtocolError, "ping/pong payload mismatch")
 			return fatal(ErrConnClosed)
@@ -226,7 +226,7 @@ func (conn *Conn) handleClose(n int, isMasked bool) {
 		return
 	}
 
-	conn.controlWriter.unMask(payload)
+	conn.controlWriter.mask(payload)
 
 	code := binary.BigEndian.Uint16(payload[:2])
 	if !isValidCloseCode(code) {
