@@ -63,4 +63,6 @@ var (
 	ErrInsufficientHeaderSpace = errors.New("no enough space to write headers")
 	ErrInternalServer          = errors.New("something went wrong")
 	ErrTimeout                 = errors.New("time out")
+
+	ErrPingAlreadySent = errors.New("ping already sent")
 )

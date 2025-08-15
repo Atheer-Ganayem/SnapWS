@@ -261,8 +261,21 @@ func (conn *Conn) SendJSON(ctx context.Context, v any) error {
 // Ping sends a WebSocket ping frame and waits for it to be sent.
 // Ping\Pong frames are already handeled by the library, you dont need
 // to habdle them manually.
+// If a ping has been sent and a pong frame hasn't been received yet, the function will
+// return a non-nil error snapws.ErrPingAlreadySent. So, if you wish to send a ping manually,
+// you should keep trying until the error is not snapws.ErrPingAlreadySent.
 func (conn *Conn) Ping() error {
-	return conn.controlWriter.writeControl(OpcodePing, 0, false)
+	if conn.pingSent.Load() {
+		return ErrPingAlreadySent
+	}
+
+	err := conn.controlWriter.writeControl(OpcodePing, 0, false)
+	if err != nil {
+		return err
+	}
+
+	conn.pingSent.Store(true)
+	return nil
 }
 
 // pong sends a pong control frame in response to a ping.

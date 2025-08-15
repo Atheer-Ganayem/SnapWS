@@ -3,6 +3,7 @@ package snapws
 import (
 	"bufio"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -117,11 +118,10 @@ func (conn *Conn) pingLoop() {
 		conn.ticker = time.NewTicker(conn.upgrader.PingEvery)
 	}
 	for range conn.ticker.C {
-		if err := conn.Ping(); err != nil {
+		if err := conn.Ping(); err != nil && err != ErrPingAlreadySent {
 			conn.CloseWithCode(ClosePolicyViolation, err.Error())
 			return
 		}
-		conn.pingSent.Store(true)
 	}
 }
 
@@ -154,6 +154,7 @@ func (conn *Conn) handlePong(n int, isMasked bool) error {
 			conn.CloseWithCode(CloseInternalServerErr, "timeout")
 			return fatal(ErrConnClosed)
 		}
+		fmt.Println("pong")
 		conn.pingSent.Store(false)
 	} else {
 		if _, err := conn.readBuf.Discard(4 + n); err != nil {
