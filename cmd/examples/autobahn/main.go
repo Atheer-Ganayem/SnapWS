@@ -11,7 +11,8 @@ var upgrader *snapws.Upgrader
 
 func main() {
 	upgrader = snapws.NewUpgrader(&snapws.Options{
-		MaxMessageSize: snapws.DefaultMaxMessageSize * 16, // autobahn tests messages up to 16MB
+		MaxMessageSize:     snapws.DefaultMaxMessageSize * 16, // autobahn tests messages up to 16MB
+		SkipUTF8Validation: false,                             // this is the default value btw
 	})
 
 	http.HandleFunc("/", handler)

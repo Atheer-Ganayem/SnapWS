@@ -113,22 +113,21 @@ func (conn *Conn) skipRestOfMessage() error {
 		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 		return err
 	}
+
 	for !conn.reader.fin {
 		opcode, err := conn.acceptFrame()
 		if err != nil {
 			return err
 		}
 
-		if isData(opcode) {
-			conn.reader.overflowOpcode = opcode
-			conn.reader.fragments = 0
-			conn.reader.totalSize = conn.reader.remaining
-			return nil
-		} else if opcode == OpcodeContinuation {
-			if _, err := conn.readBuf.Discard(conn.reader.remaining); err != nil {
-				conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-				return err
-			}
+		if opcode != OpcodeContinuation {
+			conn.CloseWithCode(CloseProtocolError, ErrExpectedContinuation.Error())
+			return ErrExpectedContinuation
+		}
+
+		if _, err = conn.readBuf.Discard(conn.reader.remaining); err != nil {
+			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+			return err
 		}
 	}
 
