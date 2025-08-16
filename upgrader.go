@@ -1,8 +1,10 @@
 package snapws
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -100,8 +102,10 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	// writing response
 	p := brw.Writer.AvailableBuffer()
+	conn := u.newConn(c, subProtocol, brw.Reader, p)
+
+	// writing response
 	p = append(p, "HTTP/1.1 101 Switching Protocols\r\n"...)
 	p = append(p, "Upgrade: websocket\r\n"...)
 	p = append(p, "Connection: Upgrade\r\n"...)
@@ -120,7 +124,6 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 		return nil, err
 	}
 
-	conn := u.newConn(c, subProtocol, brw.Reader, p)
 	if u.OnConnect != nil {
 		u.OnConnect(conn)
 	}
@@ -216,4 +219,28 @@ func selectSubProtocol(r *http.Request, subProtocols []string) string {
 // Appends the receive middleware to the middlewares slice of the upgrader.
 func (u *Upgrader) Use(mw Middlware) {
 	u.Middlwares = append(u.Middlwares, mw)
+}
+
+// This is from gorilla/websocket
+type brNetConn struct {
+	br *bufio.Reader
+	net.Conn
+}
+
+// If there is still data in the http buffer it reads from it.
+// When the http buffer gets empty, it sets it to nil to be collected by the GC,
+// then for future reads it reads directly from the net.Conn.
+func (b *brNetConn) Read(p []byte) (n int, err error) {
+	if b.br != nil {
+		// Limit read to buferred data.
+		if n := b.br.Buffered(); len(p) > n {
+			p = p[:n]
+		}
+		n, err = b.br.Read(p)
+		if b.br.Buffered() == 0 {
+			b.br = nil
+		}
+		return n, err
+	}
+	return b.Conn.Read(p)
 }

@@ -3,7 +3,6 @@ package snapws
 import (
 	"bufio"
 	"encoding/binary"
-	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -60,7 +59,12 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb 
 		if size < MaxHeaderSize {
 			size += MaxHeaderSize
 		}
-		conn.readBuf = bufio.NewReaderSize(conn.raw, size)
+		if br.Buffered() > 0 && br != nil {
+			// The client sent data before receiving the response.
+			conn.readBuf = bufio.NewReaderSize(&brNetConn{Conn: conn.raw, br: br}, size)
+		} else {
+			conn.readBuf = bufio.NewReaderSize(conn.raw, size)
+		}
 	}
 
 	conn.reader = ConnReader{conn: conn}
@@ -154,7 +158,6 @@ func (conn *Conn) handlePong(n int, isMasked bool) error {
 			conn.CloseWithCode(CloseInternalServerErr, "timeout")
 			return fatal(ErrConnClosed)
 		}
-		fmt.Println("pong")
 		conn.pingSent.Store(false)
 	} else {
 		if _, err := conn.readBuf.Discard(4 + n); err != nil {

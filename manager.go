@@ -146,10 +146,6 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedCon
 // you can set it as a zero value of you KeyType), opcode (text or binary), data as a slice of bytes.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode uint8, data []byte) (int, error) {
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-
 	if !isData(opcode) {
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
