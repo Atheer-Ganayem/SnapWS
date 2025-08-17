@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"time"
-	"unicode/utf8"
 )
 
 // ConnReader provides an io.Reader for a single WebSocket message.
@@ -249,6 +248,8 @@ func (r *ConnReader) Read(p []byte) (n int, err error) {
 
 // ReadMessage reads the next complete WebSocket message into memory.
 // It returns the message type (e.g., Text or Binary), the full payload, and any error encountered.
+// If SkipUTF8Validation is not enabled, the message will be UTF8 validated,
+// if it fails, the connection would be closed for a protocol error.
 func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 	reader, msgType, err := conn.NextReader()
 	if err != nil {
@@ -258,13 +259,6 @@ func (conn *Conn) ReadMessage() (msgType uint8, data []byte, err error) {
 	data, err = io.ReadAll(reader)
 	if err != nil {
 		return nilOpcode, nil, err
-	}
-
-	if msgType == OpcodeText && !conn.upgrader.SkipUTF8Validation {
-		if ok := utf8.Valid(data); !ok {
-			conn.CloseWithCode(CloseInvalidFramePayloadData, ErrInvalidUTF8.Error())
-			return nilOpcode, nil, fatal(ErrInvalidUTF8)
-		}
 	}
 
 	return msgType, data, nil
@@ -288,8 +282,10 @@ func (conn *Conn) ReadBinary() (data []byte, err error) {
 	return payload, nil
 }
 
-// ReadString returns the message payload as a UTF-8 byte slice from a text WebSocket message.
+// ReadString returns the payload from a WebSocket text message.
 //
+// If SkipUTF8Validation is not enabled, the message will be UTF8 validated,
+// if it fails, the connection would be closed for a protocol error.
 // If the received message is not of type text, it returns snapws.ErrMessageTypeMismatch
 // without closing the connection.
 // The returned error must be checked. If it's of type snapws.FatalError,

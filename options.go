@@ -83,6 +83,8 @@ type Options struct {
 	// BackpressureStrategy BackpressureStrategy
 
 	// SkipUTF8Validation disables UTF-8 validation for text frames.
+	// if UTF8 validtion is enabled, the library would be validating text messages only when
+	// ReadString() is called. Not on every read (NextReader(), Read()).
 	// UTF-8 for text messages is required by RFC 6455.
 	// If you need max performance and don't care about the validity of the message.
 	// you can disable it.
