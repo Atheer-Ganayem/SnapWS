@@ -29,7 +29,10 @@ const (
 	OpcodePing         = 0x9 // Ping
 	OpcodePong         = 0xA // Pong
 
-	nilOpcode = 0x3 // internal use
+	// internal use, used when a function return an opcode but an error occured.
+	// In other words: default value of an opcode. because the default value of uint8 is 0,
+	// and 0 indicates "OpcodeText".
+	nilOpcode = 0xff
 )
 
 const MaxHeaderSize = 14

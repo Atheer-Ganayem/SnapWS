@@ -34,12 +34,14 @@ type ConnReader struct {
 // it handles it and keeps reading till it reads a data frame.
 // Note: it resets the conn.reader (only the current frame info) if it reads a valid control frame,
 // because of that, you should only call it when you are ready to reset it.
+// All errors returned should be considred fatal errors,
+// which means the connection has been closed by the fucntion.
 func (conn *Conn) acceptFrame() (uint8, error) {
 	for {
 		b, err := conn.nRead(2)
 		if err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-			return nilOpcode, fatal(err)
+			return nilOpcode, err
 		}
 
 		// reading header values
@@ -104,14 +106,14 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 			switch opcode {
 			case OpcodeClose:
 				conn.handleClose(n, isMasked)
-				return nilOpcode, fatal(ErrConnClosed)
+				return nilOpcode, ErrConnClosed
 			case OpcodePing:
 				if err := conn.pong(n, isMasked); err != nil {
-					return 0, err
+					return nilOpcode, err
 				}
 			case OpcodePong:
 				if err = conn.handlePong(n, isMasked); err != nil {
-					return 0, err
+					return nilOpcode, err
 				}
 			}
 			continue
@@ -144,24 +146,24 @@ func (conn *Conn) acceptFrame() (uint8, error) {
 func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 	select {
 	case <-conn.done:
-		return nil, 0, fatal(ErrConnClosed)
+		return nil, nilOpcode, fatal(ErrConnClosed)
 	default:
 	}
 
 	err := conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait))
 	if err != nil {
 		conn.CloseWithCode(CloseInternalServerErr, "timeout")
-		return nil, 0, fatal(err)
+		return nil, nilOpcode, fatal(err)
 	}
 
 	opcode, err := conn.acceptFrame()
 	if err != nil {
-		return nil, 0, fatal(err)
+		return nil, nilOpcode, fatal(err)
 	}
 
 	if !isData(opcode) {
 		conn.CloseWithCode(CloseProtocolError, ErrInvalidOPCODE.Error())
-		return nil, 0, fatal(ErrInvalidOPCODE)
+		return nil, nilOpcode, fatal(ErrInvalidOPCODE)
 	}
 
 	conn.reader.fragments = 0
@@ -169,12 +171,12 @@ func (conn *Conn) NextReader() (io.Reader, uint8, error) {
 
 	ok, err := conn.allow()
 	if err != nil {
-		return nil, 0, fatal(err)
+		return nil, nilOpcode, fatal(err)
 	} else if !ok {
 		if err := conn.skipRestOfMessage(); err != nil {
-			return nil, 0, fatal(err)
+			return nil, nilOpcode, fatal(err)
 		}
-		return nil, 0, errors.New("rate limited")
+		return nil, nilOpcode, errors.New("rate limited")
 	}
 
 	return &conn.reader, opcode, nil

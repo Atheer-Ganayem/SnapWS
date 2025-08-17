@@ -29,10 +29,10 @@ type ConnWriter struct {
 
 // newWriter is a constructor for conn.writer, only to be used once.
 // When request the next writer, reset(opcode uint8) should be the one to be called.
-func (conn *Conn) newWriter(opcode uint8, b []byte) *ConnWriter {
+func (conn *Conn) newWriter(b []byte) *ConnWriter {
 	w := &ConnWriter{
 		conn:   conn,
-		opcode: opcode,
+		opcode: nilOpcode,
 		lock:   newMu(conn),
 		closed: true,
 	}
@@ -156,7 +156,7 @@ func (w *ConnWriter) Flush(FIN bool) error {
 	err = w.conn.sendFrame(w.buf[w.start:w.used])
 	if err != nil {
 		w.conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-		return err
+		return fatal(err)
 	}
 
 	w.flushCount++
@@ -179,10 +179,12 @@ func (w *ConnWriter) Close() error {
 
 // sendFrame writes a prepared frame to the underlying connection.
 // This function is for internal library use.
+// All non-nil errors returned are fatal.
+// The fucntion doesnt close the connection on error.
 func (conn *Conn) sendFrame(buf []byte) error {
 	_, err := conn.raw.Write(buf)
 
-	return fatal(err)
+	return err
 }
 
 // Receives a context, opcode (text or binary), and a slice of bytes.
@@ -271,7 +273,7 @@ func (conn *Conn) Ping() error {
 
 	err := conn.controlWriter.writeControl(OpcodePing, 0, false)
 	if err != nil {
-		return err
+		return fatal(err)
 	}
 
 	conn.pingSent.Store(true)
@@ -281,15 +283,19 @@ func (conn *Conn) Ping() error {
 // pong sends a pong control frame in response to a ping.
 // Ping\pong frames are already handeled by the library, you dont need
 // to habdle them manually.
+// All non-nil errors returned by the function should be considered fatal,
+// and the fucntion handles closing the connection internally.
 func (conn *Conn) pong(n int, isMasked bool) error {
 	err := conn.controlWriter.writeControl(OpcodePong, n, isMasked)
-	if IsFatalErr(err) {
+	if err != nil {
 		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
 	}
-	return err
+	return fatal(err)
 }
 
 // Writes control frame.
+// All errors must be considered fatal, and the connection must be closed manually.
+// this function doesnt close the connection.
 func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if cw.t == nil {
 		cw.t = time.NewTimer(cw.conn.upgrader.WriteWait)
@@ -306,7 +312,7 @@ func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 
 	// set deadline
 	if err = cw.conn.raw.SetWriteDeadline(time.Now().Add(cw.conn.upgrader.WriteWait)); err != nil {
-		return fatal(err)
+		return err
 	}
 
 	// write header and payload
@@ -316,14 +322,14 @@ func (cw *ControlWriter) writeControl(opcode byte, n int, isMasked bool) error {
 	if isMasked {
 		b, err := cw.conn.nRead(4)
 		if err != nil {
-			return fatal(ErrInternalServer)
+			return ErrInternalServer
 		}
 		copy(cw.maskKey[:], b)
 	}
 	if n > 0 && n <= MaxControlFramePayload {
 		payload, err := cw.conn.nRead(n)
 		if err != nil {
-			return fatal(ErrConnClosed)
+			return ErrConnClosed
 		}
 		cw.buf[1] = byte(n)
 

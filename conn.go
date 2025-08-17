@@ -68,7 +68,7 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb 
 	}
 
 	conn.reader = ConnReader{conn: conn}
-	conn.writer = conn.newWriter(OpcodeText, wb)
+	conn.writer = conn.newWriter(wb)
 	conn.controlWriter = conn.newControlWriter()
 
 	go conn.pingLoop()
@@ -131,7 +131,8 @@ func (conn *Conn) pingLoop() {
 
 // used to handle pong when sent from the client.
 // called by acceptFrame() (in conn_read.go).
-// returns an error, if the error is fatal it closes the connection.
+// All non-nil errors returned by the function should be considered fatal,
+// and the fucntion handles closing the connection internally.
 func (conn *Conn) handlePong(n int, isMasked bool) error {
 	if conn.pingSent.Load() {
 		if isMasked {
@@ -146,23 +147,23 @@ func (conn *Conn) handlePong(n int, isMasked bool) error {
 		p, err := conn.nRead(n)
 		if err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
-			return fatal(err)
+			return err
 		}
 
 		conn.controlWriter.mask(p)
 		if ok := comparePayload(conn.pingPayload[:], p); !ok {
 			conn.CloseWithCode(CloseProtocolError, "ping/pong payload mismatch")
-			return fatal(ErrConnClosed)
+			return ErrConnClosed
 		}
 		if err = conn.raw.SetReadDeadline(time.Now().Add(conn.upgrader.ReadWait)); err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, "timeout")
-			return fatal(ErrConnClosed)
+			return ErrConnClosed
 		}
 		conn.pingSent.Store(false)
 	} else {
 		if _, err := conn.readBuf.Discard(4 + n); err != nil {
 			conn.CloseWithCode(CloseInternalServerErr, "something went wrong")
-			return fatal(ErrConnClosed)
+			return ErrConnClosed
 		}
 	}
 
