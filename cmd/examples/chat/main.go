@@ -12,16 +12,19 @@ import (
 var manager *snapws.Manager[string]
 
 func main() {
-	upgrader := snapws.NewUpgrader(&snapws.Options{
-		Middlwares: []snapws.Middlware{rejectDuplicateNames},
-	})
+	// Intiliazing the upgrader that handles upgrading requests to Websocket.
+	upgrader := snapws.NewUpgrader(nil)
+	upgrader.Use(rejectDuplicateNames)
+
+	// Intiliazing Manager to keep track of connection and broadcast messages.
 	manager = snapws.NewManager[string](upgrader)
 	defer manager.Shutdown()
+
+	// Hooks
 	manager.OnRegister = onRigester
 	manager.OnUnregister = onUnrigester
 
 	http.HandleFunc("/", handler)
-
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
@@ -45,7 +48,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 		// Broadcast message to all except sender
 		msg := fmt.Sprintf("%s: %s", name, data)
-		_, err = manager.BroadcastString(context.TODO(), conn.Key, []byte(msg))
+		_, err = manager.BroadcastString(context.TODO(), []byte(msg), conn.Key)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -65,9 +68,11 @@ func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func onRigester(id string, conn *snapws.ManagedConn[string]) {
-	manager.BroadcastString(context.TODO(), id, []byte(id+" connected"))
+func onRigester(conn *snapws.ManagedConn[string]) {
+	id := conn.Key
+	manager.BroadcastString(context.TODO(), []byte(id+" connected"), id)
 }
-func onUnrigester(id string, conn *snapws.ManagedConn[string]) {
-	conn.Manager.BroadcastString(context.TODO(), id, []byte(id+" disconnected"))
+func onUnrigester(conn *snapws.ManagedConn[string]) {
+	id := conn.Key
+	conn.Manager.BroadcastString(context.TODO(), []byte(id+" disconnected"), id)
 }

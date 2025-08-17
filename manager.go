@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
@@ -27,8 +28,8 @@ type Manager[KeyType comparable] struct {
 	Mu       sync.RWMutex
 	Upgrader *Upgrader
 
-	OnRegister   func(id KeyType, conn *ManagedConn[KeyType])
-	OnUnregister func(id KeyType, conn *ManagedConn[KeyType])
+	OnRegister   func(conn *ManagedConn[KeyType])
+	OnUnregister func(conn *ManagedConn[KeyType])
 }
 
 // Creates a new manager. KeyType is the type of the key of the conns map.
@@ -78,7 +79,7 @@ func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
 	m.Mu.Unlock()
 
 	if m.OnRegister != nil {
-		m.OnRegister(key, conn)
+		m.OnRegister(conn)
 	}
 }
 
@@ -96,7 +97,7 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 	m.Mu.Unlock()
 
 	if m.OnUnregister != nil {
-		m.OnUnregister(id, conn)
+		m.OnUnregister(conn)
 	}
 
 	return nil
@@ -127,13 +128,17 @@ func (m *Manager[KeyType]) GetAllConns() []*ManagedConn[KeyType] {
 }
 
 // Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
-func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedConn[KeyType] {
+func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude ...KeyType) []*ManagedConn[KeyType] {
+	if len(exclude) == 0 {
+		return m.GetAllConns()
+	}
+
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
 
 	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
 	for k, v := range m.Conns {
-		if k != exclude {
+		if !slices.Contains(exclude, k) {
 			conns = append(conns, v)
 		}
 	}
@@ -142,15 +147,15 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude KeyType) []*ManagedCon
 
 // broadcast sends a message to all active connections.
 // this function is to be used by the library, you can use BroadcastString or BroadcastBytes.
-// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
-// you can set it as a zero value of you KeyType), opcode (text or binary), data as a slice of bytes.
+// It takes a context.Context, opcode (text or binary), data as a slice of bytes,
+// and an optional "exclude" which are the keys of connections to exclude from the broadcast
 // It returns "n" the number of successfull writes, and an error.
-func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcode uint8, data []byte) (int, error) {
+func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []byte, exclude ...KeyType) (int, error) {
 	if !isData(opcode) {
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
-	conns := m.GetAllConnsWithExclude(exclude)
+	conns := m.GetAllConnsWithExclude(exclude...)
 	connsLength := len(conns)
 	if connsLength == 0 {
 		return 0, nil
@@ -206,23 +211,23 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, exclude KeyType, opcod
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".
-// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
-// you can set it as a zero value of your KeyType).
+// It takes a context.Context, data as a slice of bytes,
+// and an optional "exclude" which are the keys of connections to exclude from the broadcast
 // data must be a valid UTF-8 string, otherwise an error will be returned.
 // It returns "n" the number of successfull writes, and an error.
-func (m *Manager[KeyType]) BroadcastString(ctx context.Context, exclude KeyType, data []byte) (int, error) {
+func (m *Manager[KeyType]) BroadcastString(ctx context.Context, data []byte, exclude ...KeyType) (int, error) {
 	if !m.Upgrader.SkipUTF8Validation && !utf8.Valid(data) {
 		return 0, ErrInvalidUTF8
 	}
-	return m.broadcast(ctx, exclude, OpcodeText, data)
+	return m.broadcast(ctx, OpcodeText, data, exclude...)
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".
-// It takes a context.Context, a connection "key" to exlude (if you want to include every conn
-// you can set it as a zero value of your KeyType).
+// It takes a context.Context, data as a slice of bytes,
+// and an optional "exclude" which are the keys of connections to exclude from the broadcast
 // It returns "n" the number of successfull writes, and an error.
-func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, exclude KeyType, data []byte) (int, error) {
-	return m.broadcast(ctx, exclude, OpcodeBinary, data)
+func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, data []byte, exclude ...KeyType) (int, error) {
+	return m.broadcast(ctx, OpcodeBinary, data, exclude...)
 }
 
 // Shut downs the manager:

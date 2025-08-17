@@ -129,10 +129,12 @@ type Middlwares []Middlware
 
 // A function representing a middleware that will be ran after validating the websocket upgrade request
 // and before switching protocols.
-// If an error returns the connection wont be accepted.
+// If a non-nil error returns the connection wont be accepted.
 // It is prefered to return an error of type snapws.MiddlewareErr.
 type Middlware func(w http.ResponseWriter, r *http.Request) error
 
+// An error that can be returned by a middleware.
+// It's usefull if you want to explicitly set the HTTP response code and error message.
 type MiddlewareErr struct {
 	Code    int
 	Message string
