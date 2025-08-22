@@ -1,0 +1,276 @@
+package snapws
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"sync"
+)
+
+// Room represents a group of WebSocket connections that can receive broadcast messages together.
+// Rooms are identified by a comparable key type and provide thread-safe operations for
+// managing connections and broadcasting messages.
+//
+// Typical usage:
+//   - Chat rooms where users in the same room receive each other's messages
+//   - Game lobbies where players receive game state updates
+//   - Collaborative editing where document collaborators receive changes
+type Room[keyType comparable] struct {
+	rm  *RoomManager[keyType]
+	key keyType // key in the parent roomManager
+
+	conns map[*Conn]bool
+	mu    sync.RWMutex
+}
+
+// RoomManager handles creation, lookup, and lifecycle of rooms.
+// It provides thread-safe operations for managing multiple rooms and their connections.
+// Each room is identified by a unique comparable key.
+type RoomManager[keyType comparable] struct {
+	rooms    map[keyType]*Room[keyType]
+	mu       sync.RWMutex
+	Upgrader *Upgrader
+}
+
+// NewRoomManager creates a new RoomManager with the given WebSocket upgrader.
+// If upgrader is nil, a default upgrader with standard options will be created.
+//
+// The keyType must be a comparable type (string, int, custom types with comparable fields).
+// This key will be used to uniquely identify and retrieve rooms.
+func NewRoomManager[keyType comparable](upgrader *Upgrader) *RoomManager[keyType] {
+	if upgrader == nil {
+		upgrader = NewUpgrader(nil)
+	}
+
+	return &RoomManager[keyType]{
+		rooms:    make(map[keyType]*Room[keyType]),
+		Upgrader: upgrader,
+	}
+}
+
+// newRoom creates a new Room instance with empty connection set.
+// This is an internal method used by RoomManager to create rooms.
+func (rm *RoomManager[keyType]) newRoom(key keyType) *Room[keyType] {
+	return &Room[keyType]{
+		conns: make(map[*Conn]bool),
+		rm:    rm,
+		key:   key,
+	}
+}
+
+// Connect upgrades an HTTP connection to WebSocket and adds it to the specified room.
+// If the room doesn't exist, it will be created automatically.
+//
+// This is a convenience method that combines WebSocket upgrade, room creation/lookup,
+// and connection addition in a single atomic operation.
+//
+// Returns the upgraded connection, the room it was added to, and any error from the upgrade process.
+func (rm *RoomManager[keyType]) Connect(w http.ResponseWriter, r *http.Request, roomKey keyType) (*Conn, *Room[keyType], error) {
+	conn, err := rm.Upgrader.Upgrade(w, r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	room := rm.Add(roomKey)
+	room.Add(conn)
+
+	return conn, room, nil
+}
+
+// Add creates a new room with the given key, or returns the existing room if it already exists.
+// This operation is idempotent - calling it multiple times with the same key is safe
+// and will always return the same room instance.
+//
+// Thread-safe: Multiple goroutines can call this concurrently.
+func (rm *RoomManager[keyType]) Add(key keyType) *Room[keyType] {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if r, exists := rm.rooms[key]; exists {
+		return r
+	}
+
+	r := rm.newRoom(key)
+	rm.rooms[key] = r
+
+	return r
+}
+
+// Get retrieves a room by its key.
+// Returns nil if the room doesn't exist.
+//
+// The returned room pointer must be checked for nil before use:
+//
+//	if room := manager.Get("lobby"); room != nil {
+//	    room.BroadcastString(ctx, message)
+//	}
+//
+// Thread-safe: Multiple goroutines can call this concurrently.
+func (rm *RoomManager[keyType]) Get(key keyType) *Room[keyType] {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	return rm.rooms[key]
+}
+
+// Shutdown closes all rooms and their connections.
+// This should be called when shutting down the application to ensure
+// all WebSocket connections are properly closed.
+//
+// After calling Shutdown, the RoomManager should not be used.
+func (rm *RoomManager[keyType]) Shutdown() {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	connsCount := 0
+	for _, r := range rm.rooms {
+		r.mu.Lock()
+		connsCount += len(r.conns)
+	}
+
+	var wg sync.WaitGroup
+	workers := (connsCount / 5) + 2
+	ch := make(chan *Conn, connsCount)
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range ch {
+				c.CloseWithCode(CloseGoingAway, "server is shutting down")
+			}
+		}()
+	}
+
+	for _, r := range rm.rooms {
+		for c := range r.conns {
+			ch <- c
+		}
+		r.mu.Unlock()
+	}
+
+	close(ch)
+	rm.rooms = make(map[keyType]*Room[keyType])
+
+	wg.Wait()
+}
+
+// Close removes all connections from the room and deletes the room from its manager.
+// All connections in the room will be removed but not closed - they remain active
+// and can be added to other rooms.
+//
+// After calling Close, this room instance should not be used.
+func (r *Room[keyType]) Close() {
+	r.RemoveAll()
+
+	r.rm.mu.Lock()
+	defer r.rm.mu.Unlock()
+	delete(r.rm.rooms, r.key)
+}
+
+// Add adds a connection to the room.
+// The connection will be automatically removed from the room when it closes.
+//
+// Thread-safe: Multiple goroutines can call this concurrently.
+// If the connection is already in the room, this is a no-op.
+func (r *Room[keyType]) Add(conn *Conn) {
+	r.mu.Lock()
+	r.conns[conn] = true
+	r.mu.Unlock()
+
+	// Set up automatic cleanup when connection closes
+	conn.onCloseMu.Lock()
+	defer conn.onCloseMu.Unlock()
+	conn.onClose = func() {
+		r.Remove(conn)
+	}
+}
+
+// Remove removes a connection from the room.
+// If the connection is not in the room, this is a no-op.
+//
+// Thread-safe: Multiple goroutines can call this concurrently.
+func (r *Room[keyType]) Remove(conn *Conn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.conns, conn)
+}
+
+// RemoveAll removes all connections from the room.
+// The connections are not closed, just removed from the room.
+//
+// Thread-safe: Can be called concurrently with other room operations.
+func (r *Room[keyType]) RemoveAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.conns = make(map[*Conn]bool)
+}
+
+// Move removes a connection from this room and adds it to another room.
+// If the target room doesn't exist, the connection is only removed from the current room.
+//
+// The target room must exist in the same RoomManager as the current room.
+//
+// Thread-safe: The move operation is atomic from the perspective of the connection.
+func (r *Room[keyType]) Move(conn *Conn, newRoom keyType) {
+	r.Remove(conn)
+	if nr := r.rm.Get(newRoom); nr != nil {
+		nr.Add(conn)
+	}
+}
+
+// broadcast sends a message to all connections in the room using worker goroutines.
+// This is an internal method used by BroadcastString and BroadcastBytes.
+//
+// Returns the number of successful sends and any error encountered.
+// Uses the BroadcastWorkers configuration from the upgrader to determine concurrency.
+func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte) (int, error) {
+	if !isData(opcode) {
+		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
+	}
+
+	r.mu.RLock()
+	connsLength := len(r.conns)
+	if connsLength == 0 {
+		r.mu.RUnlock()
+		return 0, nil
+	}
+
+	// Create snapshot of connections to avoid holding lock during broadcast
+	conns := make([]*Conn, 0, len(r.conns))
+	for c := range r.conns {
+		conns = append(conns, c)
+	}
+	r.mu.RUnlock()
+
+	// Determine number of worker goroutines for broadcasting
+	var workers int
+	if r.rm.Upgrader.BroadcastWorkers != nil {
+		workers = r.rm.Upgrader.BroadcastWorkers(connsLength)
+	}
+	if workers <= 0 {
+		workers = (connsLength / 10) + 2
+	}
+
+	return broadcast(ctx, conns, opcode, data, workers)
+}
+
+// BroadcastString sends a text message to all connections in the room.
+//
+// Returns the number of connections that successfully received the message
+// and any error encountered during broadcasting.
+//
+// Thread-safe: Can be called concurrently from multiple goroutines.
+func (r *Room[keyType]) BroadcastString(ctx context.Context, data []byte) (int, error) {
+	return r.broadcast(ctx, OpcodeText, data)
+}
+
+// BroadcastBytes sends a binary message to all connections in the room.
+//
+// Returns the number of connections that successfully received the message
+// and any error encountered during broadcasting.
+//
+// Thread-safe: Can be called concurrently from multiple goroutines.
+func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte) (int, error) {
+	return r.broadcast(ctx, OpcodeBinary, data)
+}

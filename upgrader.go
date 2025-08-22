@@ -35,7 +35,7 @@ func NewUpgrader(opts *Options) *Upgrader {
 	if !opts.DisableWriteBuffersPooling {
 		u.writePool = sync.Pool{
 			New: func() any {
-				return &PooledBuf{make([]byte, u.WriteBufferSize)}
+				return &pooledBuf{make([]byte, u.WriteBufferSize)}
 			},
 		}
 	}

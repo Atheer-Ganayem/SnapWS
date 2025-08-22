@@ -28,6 +28,10 @@ type Conn struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	onClose   func()
+	// onCloseMu protects concurrent access to onClose callbacks.
+	// This prevents race conditions when connections move between rooms
+	// and multiple goroutines try to set/call onClose simultaneously.
+	onCloseMu sync.Mutex
 
 	// for ping loop
 	ticker      *time.Ticker
@@ -193,9 +197,12 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		if conn.upgrader.OnDisconnect != nil {
 			conn.upgrader.OnDisconnect(conn)
 		}
+
+		conn.onCloseMu.Lock()
 		if conn.onClose != nil {
 			conn.onClose()
 		}
+		conn.onCloseMu.Unlock()
 
 		// remove from rate limiter if exists
 		if conn.upgrader.Limiter != nil {

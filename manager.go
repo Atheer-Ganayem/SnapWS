@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -23,9 +22,9 @@ import (
 // The Upgrader field handles the WebSocket upgrade, and the optional
 // OnRegister / OnUnregister callbacks are invoked when connections are added or removed.
 type Manager[KeyType comparable] struct {
-	// Conns stores active connections keyed by a unique identifier.
-	Conns    map[KeyType]*ManagedConn[KeyType]
-	Mu       sync.RWMutex
+	// conns stores active connections keyed by a unique identifier.
+	conns    map[KeyType]*ManagedConn[KeyType]
+	mu       sync.RWMutex
 	Upgrader *Upgrader
 
 	OnRegister   func(conn *ManagedConn[KeyType])
@@ -40,7 +39,7 @@ func NewManager[KeyType comparable](u *Upgrader) *Manager[KeyType] {
 	}
 
 	m := &Manager[KeyType]{
-		Conns:    make(map[KeyType]*ManagedConn[KeyType]),
+		conns:    make(map[KeyType]*ManagedConn[KeyType]),
 		Upgrader: u,
 	}
 
@@ -71,12 +70,12 @@ func (m *Manager[KeyType]) Connect(key KeyType, w http.ResponseWriter, r *http.R
 // If the key already exists, it will close the connection associated with the key,
 // and replace it with the new connection received by the fucntion.
 func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
-	m.Mu.Lock()
-	if conn, ok := m.Conns[key]; ok {
+	m.mu.Lock()
+	if conn, ok := m.conns[key]; ok {
 		conn.raw.Close()
 	}
-	m.Conns[key] = conn
-	m.Mu.Unlock()
+	m.conns[key] = conn
+	m.mu.Unlock()
 
 	if m.OnRegister != nil {
 		m.OnRegister(conn)
@@ -85,16 +84,16 @@ func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
 
 // only to be called bt conn.Close(), dont use it manually.
 func (m *Manager[KeyType]) unregister(id KeyType) error {
-	m.Mu.Lock()
+	m.mu.Lock()
 
-	conn, ok := m.Conns[id]
+	conn, ok := m.conns[id]
 	if !ok {
-		m.Mu.Unlock()
+		m.mu.Unlock()
 		return ErrConnNotFound
 	}
 
-	delete(m.Conns, id)
-	m.Mu.Unlock()
+	delete(m.conns, id)
+	m.mu.Unlock()
 
 	if m.OnUnregister != nil {
 		m.OnUnregister(conn)
@@ -107,21 +106,21 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 // If the connection exists, it will return a pointer to it and a true value.
 // If the connection deosn't exists, it will return nil and a false value.
 func (m *Manager[KeyType]) GetConn(key KeyType) (*ManagedConn[KeyType], bool) {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	conn, ok := m.Conns[key]
+	conn, ok := m.conns[key]
 
 	return conn, ok
 }
 
 // Get all connections associated with the manager as a slice of pointers.
 func (m *Manager[KeyType]) GetAllConns() []*ManagedConn[KeyType] {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
-	for _, v := range m.Conns {
+	conns := make([]*ManagedConn[KeyType], 0, len(m.conns))
+	for _, v := range m.conns {
 		conns = append(conns, v)
 	}
 	return conns
@@ -133,15 +132,30 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude ...KeyType) []*Managed
 		return m.GetAllConns()
 	}
 
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	conns := make([]*ManagedConn[KeyType], 0, len(m.Conns))
-	for k, v := range m.Conns {
+	conns := make([]*ManagedConn[KeyType], 0, len(m.conns))
+	for k, v := range m.conns {
 		if !slices.Contains(exclude, k) {
 			conns = append(conns, v)
 		}
 	}
+	return conns
+}
+
+// Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
+func (m *Manager[KeyType]) GetAllConnsWithExcludeAsConn(exclude ...KeyType) []*Conn {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conns := make([]*Conn, 0, len(m.conns))
+	for k, v := range m.conns {
+		if !slices.Contains(exclude, k) {
+			conns = append(conns, v.Conn)
+		}
+	}
+
 	return conns
 }
 
@@ -155,7 +169,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []b
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
-	conns := m.GetAllConnsWithExclude(exclude...)
+	conns := m.GetAllConnsWithExcludeAsConn(exclude...)
 	connsLength := len(conns)
 	if connsLength == 0 {
 		return 0, nil
@@ -169,45 +183,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []b
 		workers = (connsLength / 10) + 2
 	}
 
-	var wg sync.WaitGroup
-	ch := make(chan *ManagedConn[KeyType], workers)
-	done := make(chan struct{})
-	var n int64
-
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for conn := range ch {
-				if ctx.Err() != nil {
-					return
-				}
-
-				if err := conn.SendMessage(ctx, opcode, data); err == nil {
-					atomic.AddInt64(&n, 1)
-				}
-			}
-		}()
-	}
-
-	go func() {
-		for _, conn := range conns {
-			if ctx.Err() != nil {
-				break
-			}
-			ch <- conn
-		}
-		close(ch)
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return int(n), nil
-	case <-ctx.Done():
-		return int(n), ctx.Err()
-	}
+	return broadcast(ctx, conns, opcode, data, workers)
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".
@@ -234,7 +210,10 @@ func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, data []byte, excl
 // - Closes all connections normaly.
 // - Clears the conns map.
 func (m *Manager[KeyType]) Shutdown() {
-	workers := (len(m.Conns) / 10) + 2
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workers := (len(m.conns) / 5) + 2
 	var wg sync.WaitGroup
 	ch := make(chan *ManagedConn[KeyType], workers)
 
@@ -255,8 +234,5 @@ func (m *Manager[KeyType]) Shutdown() {
 	close(ch)
 	wg.Wait()
 
-	m.Mu.Lock()
-	m.Conns = make(map[KeyType]*ManagedConn[KeyType])
-	m.Mu.Unlock()
-
+	m.conns = make(map[KeyType]*ManagedConn[KeyType])
 }

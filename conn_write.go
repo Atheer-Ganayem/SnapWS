@@ -13,7 +13,7 @@ import (
 // Use Conn.NextWriter to safely obtain exclusive access to a writer.
 type ConnWriter struct {
 	conn *Conn
-	pb   *PooledBuf
+	pb   *pooledBuf
 	buf  []byte
 	// The start of the frame in the buf. its used to save space for the frame header.
 	start int
@@ -42,7 +42,7 @@ func (conn *Conn) newWriter(b []byte) *ConnWriter {
 	} else if conn.upgrader.DisableWriteBuffersPooling {
 		w.buf = make([]byte, conn.upgrader.WriteBufferSize)
 	} else {
-		w.pb = conn.upgrader.writePool.Get().(*PooledBuf)
+		w.pb = conn.upgrader.writePool.Get().(*pooledBuf)
 		w.buf = w.pb.buf
 	}
 

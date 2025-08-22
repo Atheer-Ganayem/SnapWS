@@ -80,10 +80,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ##############
-	// not woriking
-	// ##############33333
-
 	file, err := os.Create("cmd/examples/file-streaming/" + info.Name)
 	if err != nil {
 		return
@@ -96,7 +92,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	written := 0
-	buf := make([]byte, upgrader.ReadBufferSize)
+	buf := make([]byte, snapws.DefaultReadBufferSize)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
