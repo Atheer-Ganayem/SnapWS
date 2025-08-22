@@ -12,21 +12,31 @@ import (
 var manager *snapws.Manager[string]
 
 func main() {
-	// Intiliazing the upgrader that handles upgrading requests to Websocket.
+	// Initializing the upgrader that handles upgrading requests to Websocket.
 	upgrader := snapws.NewUpgrader(nil)
 	upgrader.Use(rejectDuplicateNames)
 
-	// Intiliazing Manager to keep track of connection and broadcast messages.
+	// Initializing Manager to keep track of connection and broadcast messages.
 	manager = snapws.NewManager[string](upgrader)
 	defer manager.Shutdown()
 
 	// Hooks
-	manager.OnRegister = onRigester
-	manager.OnUnregister = onUnrigester
+	manager.OnRegister = onRegister
+	manager.OnUnregister = onUnregister
 
 	http.HandleFunc("/", handler)
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
+}
+
+type sentMsg struct {
+	Text string `json:"text"`
+	To   string `json:"to"` // the user the message is meant to be sent to
+}
+
+type receivedMsg struct {
+	Text string `json:"text"`
+	From string `json:"from"` // the user who sent the message
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +48,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		data, err := conn.ReadString()
+		var msg sentMsg
+		err := conn.ReadJSON(&msg)
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -46,11 +57,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Broadcast message to all except sender
-		msg := fmt.Sprintf("%s: %s", name, data)
-		_, err = manager.BroadcastString(context.TODO(), []byte(msg), conn.Key)
-		if err != nil {
-			fmt.Println(err)
+		if targetConn, ok := manager.GetConn(msg.To); ok {
+			rm := receivedMsg{Text: fmt.Sprintf("%s: %s", name, msg.Text), From: name}
+			if err := targetConn.SendJSON(context.TODO(), rm); err != nil {
+				fmt.Printf("error sending message from %s to %s: %v\n", name, msg.To, err)
+			}
 		}
 	}
 }
@@ -68,11 +79,13 @@ func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func onRigester(conn *snapws.ManagedConn[string]) {
+// This is some dummy hooks.
+// In real world you might send a message to update the user's status for the other connected users.
+func onRegister(conn *snapws.ManagedConn[string]) {
 	id := conn.Key
-	manager.BroadcastString(context.TODO(), []byte(id+" connected"), id)
+	manager.BroadcastString(context.TODO(), []byte(id+" is online!"), id)
 }
-func onUnrigester(conn *snapws.ManagedConn[string]) {
+func onUnregister(conn *snapws.ManagedConn[string]) {
 	id := conn.Key
-	conn.Manager.BroadcastString(context.TODO(), []byte(id+" disconnected"), id)
+	conn.Manager.BroadcastString(context.TODO(), []byte(id+" is offline"), id)
 }

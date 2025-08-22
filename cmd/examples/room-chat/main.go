@@ -31,6 +31,9 @@ func handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	room.BroadcastString(context.TODO(), []byte(name+" has joined the room"), conn)
+	defer room.BroadcastString(context.TODO(), []byte(name+" has left the room"), conn)
+
 	for {
 		msg, err := conn.ReadString()
 		if snapws.IsFatalErr(err) {
@@ -46,7 +49,7 @@ func handleJoin(w http.ResponseWriter, r *http.Request) {
 
 // This is just some dummy example.
 // In real-world apps you will have authentication, which will prevent having
-// duplicate usernames (or whatever you identifier is).
+// duplicate usernames (or whatever your identifier is).
 func validateQuery(w http.ResponseWriter, r *http.Request) error {
 	room := r.URL.Query().Get("room")
 	name := r.URL.Query().Get("name")
@@ -56,8 +59,4 @@ func validateQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	return nil
-}
-
-func onJoin() {
-
 }

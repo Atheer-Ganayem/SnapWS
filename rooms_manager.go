@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 )
 
@@ -224,7 +225,7 @@ func (r *Room[keyType]) Move(conn *Conn, newRoom keyType) {
 //
 // Returns the number of successful sends and any error encountered.
 // Uses the BroadcastWorkers configuration from the upgrader to determine concurrency.
-func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte) (int, error) {
+func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte, exclude ...*Conn) (int, error) {
 	if !isData(opcode) {
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
@@ -239,7 +240,9 @@ func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte
 	// Create snapshot of connections to avoid holding lock during broadcast
 	conns := make([]*Conn, 0, len(r.conns))
 	for c := range r.conns {
-		conns = append(conns, c)
+		if !slices.Contains(exclude, c) {
+			conns = append(conns, c)
+		}
 	}
 	r.mu.RUnlock()
 
@@ -261,8 +264,8 @@ func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte
 // and any error encountered during broadcasting.
 //
 // Thread-safe: Can be called concurrently from multiple goroutines.
-func (r *Room[keyType]) BroadcastString(ctx context.Context, data []byte) (int, error) {
-	return r.broadcast(ctx, OpcodeText, data)
+func (r *Room[keyType]) BroadcastString(ctx context.Context, data []byte, exclude ...*Conn) (int, error) {
+	return r.broadcast(ctx, OpcodeText, data, exclude...)
 }
 
 // BroadcastBytes sends a binary message to all connections in the room.
@@ -271,6 +274,6 @@ func (r *Room[keyType]) BroadcastString(ctx context.Context, data []byte) (int, 
 // and any error encountered during broadcasting.
 //
 // Thread-safe: Can be called concurrently from multiple goroutines.
-func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte) (int, error) {
-	return r.broadcast(ctx, OpcodeBinary, data)
+func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte, exclude ...*Conn) (int, error) {
+	return r.broadcast(ctx, OpcodeBinary, data, exclude...)
 }
