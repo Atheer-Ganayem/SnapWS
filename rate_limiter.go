@@ -30,7 +30,7 @@ type RateLimiter struct {
 	// clients maps each connection to its individual rate limiter.
 	// Each connection gets its own token bucket with the same rate/burst settings.
 	clients map[*Conn]*rate.Limiter
-	mu sync.RWMutex
+	mu      sync.RWMutex
 
 	// mps is the number of messages allowed per second for each connection
 	mps int
@@ -50,10 +50,20 @@ type RateLimiter struct {
 	OnRateLimitHit func(conn *Conn) error
 }
 
-func NewRateLimiter(rps, burst int) *RateLimiter {
+// NewRateLimiter creates and returns a new RateLimiter.
+// The limiter uses a token bucket algorithm, where:
+//   - mps: number of tokens (messages) added per second.
+//   - burst: maximum number of tokens the bucket can hold at once.
+//
+// Example:
+//
+//	mps = 3, burst = 5
+//	- At most 5 messages can be allowed immediately if the bucket is full.
+//	- Each second, 3 new tokens are added, up to the burst limit.
+func NewRateLimiter(mps, burst int) *RateLimiter {
 	return &RateLimiter{
 		clients: make(map[*Conn]*rate.Limiter),
-		mps:     rps,
+		mps:     mps,
 		burst:   burst,
 	}
 }
