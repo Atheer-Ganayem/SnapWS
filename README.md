@@ -36,10 +36,10 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 
 [Examples]("https://github.com/Atheer-Ganayem/SnapWS/blob/main/cmd/examples")
 
-- [Simple echo]("https://github.com/Atheer-Ganayem/SnapWS/blob/main/cmd/examples/echo/main.go")
-- [Room bases chat]("https://github.com/Atheer-Ganayem/SnapWS/blob/main/cmd/examples/room-chat/main.go")
-- [Direct messages (1:1 chat)]("https://github.com/Atheer-Ganayem/SnapWS/blob/main/cmd/examples/direct-messages/main.go")
-- [File streaming]("https://github.com/Atheer-Ganayem/SnapWS/blob/main/cmd/examples/file-streaming/main.go")
+- [Simple echo]("./cmd/examples/echo/main.go")
+- [Room bases chat]("./cmd/examples/room-chat/main.go")
+- [Direct messages (1:1 chat)]("./cmd/examples/direct-messages/main.go")
+- [File streaming]("./cmd/examples/file-streaming/main.go")
 
 ## 🚀 Getting Started
 
