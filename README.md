@@ -6,10 +6,7 @@
 
 **SnapWS is a minimal WebSocket library for Go.**
 
-It takes care of ping/pong, close frames, connection safety, and lifecycle management so you can just connect, read, and write — without boilerplate or extra complexity.
-
-> 🚧 **UNDER DEVELOPMENT** 🚧  
-> This library is not yet production-ready. Expect breaking changes as development continues.
+It takes care of ping/pong, close frames, connection safety, rate limiting, and lifecycle management so you can just connect, read, and write — without boilerplate or extra complexity.
 
 > 🧠 **Why?**  
 > Using [gorilla/websocket](https://github.com/gorilla/websocket) often felt like overkill. You had to write a lot of code, worry about race conditions, manually handle timeouts, and understand the WebSocket protocol more deeply than necessary.
@@ -23,13 +20,26 @@ It takes care of ping/pong, close frames, connection safety, and lifecycle manag
 - ✅ Minimal and easy to use API.
 - ✅ Fully passes the [autobahn-testsuite](https://github.com/crossbario/autobahn-testsuite) (not including PMCE)
 - ✅ Automatic handling of ping/pong and close frames.
-- ✅ Connection management built-in (useful when communicating between different clients like chat apps).
-- ✅ Room manager built-in.
-- ✅ Built-in easy to use rate limiter.
+- ✅ Connection manager (useful when communicating between different clients like chat apps).
+- ✅ Room manager.
+- ✅ Rate limiter.
 - ✅ Written completely in standard library amd Go offical libraries, no external libraries imported.
 - ✅ Support for middlewares and connect/disconnect hooks.
 
 ---
+
+## API Reference
+
+[API Reference](https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS)
+
+## Examples
+
+[Examples]("https://github.com/Atheer-Ganayem/SnapWS/cmd/examples")
+
+- [Simple echo]("https://github.com/Atheer-Ganayem/SnapWS/cmd/examples/echo/main.go")
+- [Room bases chat]("https://github.com/Atheer-Ganayem/SnapWS/cmd/examples/room-chat/main.go")
+- [Direct messages (1:1 chat)]("https://github.com/Atheer-Ganayem/SnapWS/cmd/examples/direct-messages/main.go")
+- [File streaming]("https://github.com/Atheer-Ganayem/SnapWS/cmd/examples/file-streaming/main.go")
 
 ## 🚀 Getting Started
 
@@ -151,7 +161,3 @@ For the benchmark i used [lesismal/go-websocket-benchmark](https://github.com/le
 | quickws | 10.00s | 723.30 | 5760040 | 5.49G | 5446060 | 5.19G | 10000 | 200 | 1024 | 354.88 | 752.95 | 942.73 | 113.04M | 122.09M | 132.24M |
 | greatws | 10.00s | 643.54 | 5365640 | 5.12G | 5004079 | 4.77G | 10000 | 200 | 1024 | 555.87 | 777.59 | 911.84 | 53.09M | 64.16M | 75.27M |
 | greatws_event | 10.00s | 685.13 | 5614890 | 5.35G | 5254480 | 5.01G | 10000 | 200 | 1024 | 346.84 | 766.93 | 899.18 | 48.77M | 51.42M | 53.27M |
-
-## API Reference
-
-https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS
