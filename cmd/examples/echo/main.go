@@ -15,7 +15,7 @@ func main() {
 	// allow bursts of 3, refill 1 per second.
 	upgrader.Limiter = snapws.NewRateLimiter(1, 3)
 
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/echo", handler)
 
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)

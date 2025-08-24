@@ -24,7 +24,7 @@ func main() {
 	manager.OnRegister = onRegister
 	manager.OnUnregister = onUnregister
 
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/ws", handler)
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
