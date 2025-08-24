@@ -34,7 +34,7 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 
 ## Examples
 
-[Examples]("./cmd/examples")
+[Examples](./cmd/examples)
 
 - [Simple echo](./cmd/examples/echo/main.go)
 - [Room bases chat](./cmd/examples/room-chat/main.go)
