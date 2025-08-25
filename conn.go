@@ -90,6 +90,8 @@ type ManagedConn[KeyType comparable] struct {
 }
 
 func (m *Manager[KeyType]) newManagedConn(conn *Conn, key KeyType) *ManagedConn[KeyType] {
+	conn.onCloseMu.Lock()
+	defer conn.onCloseMu.Unlock()
 	conn.onClose = func() {
 		m.unregister(key)
 	}
