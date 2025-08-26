@@ -10,11 +10,25 @@ import (
 
 var roomManager *snapws.RoomManager[string]
 
-func main() {
+func init() {
 	roomManager = snapws.NewRoomManager[string](nil)
 	defer roomManager.Shutdown()
 	roomManager.Upgrader.Use(validateQuery)
 
+	roomManager.DefaultOnJoin = func(room *snapws.Room[string], conn *snapws.Conn, args ...any) {
+		name, _ := snapws.GetArg[string](args, 0)
+		msg := fmt.Sprintf("%s has joined the room", name)
+		room.BroadcastString(context.TODO(), []byte(msg), conn)
+	}
+
+	roomManager.DefaultOnLeave = func(room *snapws.Room[string], conn *snapws.Conn, args ...any) {
+		name, _ := snapws.GetArg[string](args, 0)
+		msg := fmt.Sprintf("%s has left the room", name)
+		room.BroadcastString(context.TODO(), []byte(msg), conn)
+	}
+}
+
+func main() {
 	http.HandleFunc("/ws", handleJoin)
 	http.HandleFunc("/", serveHome)
 
@@ -26,14 +40,11 @@ func handleJoin(w http.ResponseWriter, r *http.Request) {
 	roomQuery := r.URL.Query().Get("room")
 	name := r.URL.Query().Get("name")
 
-	conn, room, err := roomManager.Connect(w, r, roomQuery)
+	conn, room, err := roomManager.Connect(w, r, roomQuery, name)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
-
-	room.BroadcastString(context.TODO(), []byte(name+" has joined the room"), conn)
-	defer room.BroadcastString(context.TODO(), []byte(name+" has left the room"), conn)
 
 	for {
 		msg, err := conn.ReadString()

@@ -8,7 +8,26 @@ import (
 	"sync"
 )
 
-type roomHook[keyType comparable] func(room *Room[keyType], conn *Conn)
+// User for the OnJoin/OnLeave room hooks.
+//
+// Receives a pointer to a room, a pointer to a connection, and an optional args.
+type roomHook[keyType comparable] func(room *Room[keyType], conn *Conn, args ...any)
+
+// A helper fucntion for room hooks.
+//
+// Receives a type as a generic value, an args slice, and an index.
+// If the args slice has a value at args[index] of the given type.
+// it returns the casted value and true.
+// Otherwise it returns the zero value of the given generic type and false.
+func GetArg[T any](args []any, index int) (T, bool) {
+	if len(args) > index {
+		v, ok := args[index].(T)
+		return v, ok
+	}
+
+	var zero T
+	return zero, false
+}
 
 // Room represents a group of WebSocket connections that can receive broadcast messages together.
 // Rooms are identified by a comparable key type and provide thread-safe operations for
@@ -78,18 +97,20 @@ func (rm *RoomManager[keyType]) newRoom(key keyType) *Room[keyType] {
 // Connect upgrades an HTTP connection to WebSocket and adds it to the specified room.
 // If the room doesn't exist, it will be created automatically.
 //
+// Receives args as an optinal value, these args will be passed to both the OnJoin AND OnLeave hooks.
+//
 // This is a convenience method that combines WebSocket upgrade, room creation/lookup,
 // and connection addition in a single atomic operation.
 //
 // Returns the upgraded connection, the room it was added to, and any error from the upgrade process.
-func (rm *RoomManager[keyType]) Connect(w http.ResponseWriter, r *http.Request, roomKey keyType) (*Conn, *Room[keyType], error) {
+func (rm *RoomManager[keyType]) Connect(w http.ResponseWriter, r *http.Request, roomKey keyType, args ...any) (*Conn, *Room[keyType], error) {
 	conn, err := rm.Upgrader.Upgrade(w, r)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	room := rm.Add(roomKey)
-	room.Add(conn)
+	room.Add(conn, args...)
 
 	return conn, room, nil
 }
@@ -188,9 +209,11 @@ func (r *Room[keyType]) Close() {
 // Add adds a connection to the room.
 // The connection will be automatically removed from the room when it closes.
 //
+// Receives args as an optional value, these args will be passed to the OnJoin hook.
+//
 // Thread-safe: Multiple goroutines can call this concurrently.
 // If the connection is already in the room, this is a no-op.
-func (r *Room[keyType]) Add(conn *Conn) {
+func (r *Room[keyType]) Add(conn *Conn, args ...any) {
 	r.mu.Lock()
 	r.conns[conn] = true
 	r.mu.Unlock()
@@ -198,28 +221,30 @@ func (r *Room[keyType]) Add(conn *Conn) {
 	// Set up automatic cleanup when connection closes
 	conn.onCloseMu.Lock()
 	conn.onClose = func() {
-		r.Remove(conn)
+		r.Remove(conn, args...)
 	}
 	conn.onCloseMu.Unlock()
 
 	// calling onJoin hook
 	if r.OnJoin != nil {
-		r.OnJoin(r, conn)
+		r.OnJoin(r, conn, args...)
 	}
 }
 
 // Remove removes a connection from the room.
 // If the connection is not in the room, this is a no-op.
 //
+// // Receives args as an optional value, these args will be passed to the OnLeave hook.
+//
 // Thread-safe: Multiple goroutines can call this concurrently.
-func (r *Room[keyType]) Remove(conn *Conn) {
+func (r *Room[keyType]) Remove(conn *Conn, args ...any) {
 	r.mu.Lock()
 	delete(r.conns, conn)
 	r.mu.Unlock()
 
 	// calling onLeave hook
 	if r.OnJoin != nil {
-		r.OnLeave(r, conn)
+		r.OnLeave(r, conn, args...)
 	}
 }
 
