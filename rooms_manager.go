@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+type roomHook[keyType comparable] func(room *Room[keyType], conn *Conn)
+
 // Room represents a group of WebSocket connections that can receive broadcast messages together.
 // Rooms are identified by a comparable key type and provide thread-safe operations for
 // managing connections and broadcasting messages.
@@ -18,10 +20,17 @@ import (
 //   - Collaborative editing where document collaborators receive changes
 type Room[keyType comparable] struct {
 	rm  *RoomManager[keyType]
-	key keyType // key in the parent roomManager
+	Key keyType // key in the parent roomManager
 
 	conns map[*Conn]bool
 	mu    sync.RWMutex
+
+	// Called when a connection is added to the room.
+	//If not set it will default to "DefaultOnJoin" in the RoomManager.
+	OnJoin roomHook[keyType]
+	// Called when a connection is removed from the room.
+	//If not set it will default to "DefaultOnLeave" in the RoomManager.
+	OnLeave roomHook[keyType]
 }
 
 // RoomManager handles creation, lookup, and lifecycle of rooms.
@@ -31,6 +40,11 @@ type RoomManager[keyType comparable] struct {
 	rooms    map[keyType]*Room[keyType]
 	mu       sync.RWMutex
 	Upgrader *Upgrader
+
+	// This is used when the "OnJoin" field of a room is unset.
+	DefaultOnJoin roomHook[keyType]
+	// This is used when the "OnLeave" field of a room is unset.
+	DefaultOnLeave roomHook[keyType]
 }
 
 // NewRoomManager creates a new RoomManager with the given WebSocket upgrader.
@@ -53,9 +67,11 @@ func NewRoomManager[keyType comparable](upgrader *Upgrader) *RoomManager[keyType
 // This is an internal method used by RoomManager to create rooms.
 func (rm *RoomManager[keyType]) newRoom(key keyType) *Room[keyType] {
 	return &Room[keyType]{
-		conns: make(map[*Conn]bool),
-		rm:    rm,
-		key:   key,
+		conns:   make(map[*Conn]bool),
+		rm:      rm,
+		Key:     key,
+		OnJoin:  rm.DefaultOnJoin,
+		OnLeave: rm.DefaultOnLeave,
 	}
 }
 
@@ -166,7 +182,7 @@ func (r *Room[keyType]) Close() {
 
 	r.rm.mu.Lock()
 	defer r.rm.mu.Unlock()
-	delete(r.rm.rooms, r.key)
+	delete(r.rm.rooms, r.Key)
 }
 
 // Add adds a connection to the room.
@@ -181,9 +197,14 @@ func (r *Room[keyType]) Add(conn *Conn) {
 
 	// Set up automatic cleanup when connection closes
 	conn.onCloseMu.Lock()
-	defer conn.onCloseMu.Unlock()
 	conn.onClose = func() {
 		r.Remove(conn)
+	}
+	conn.onCloseMu.Unlock()
+
+	// calling onJoin hook
+	if r.OnJoin != nil {
+		r.OnJoin(r, conn)
 	}
 }
 
@@ -193,8 +214,13 @@ func (r *Room[keyType]) Add(conn *Conn) {
 // Thread-safe: Multiple goroutines can call this concurrently.
 func (r *Room[keyType]) Remove(conn *Conn) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	delete(r.conns, conn)
+	r.mu.Unlock()
+
+	// calling onLeave hook
+	if r.OnJoin != nil {
+		r.OnLeave(r, conn)
+	}
 }
 
 // RemoveAll removes all connections from the room.
@@ -203,8 +229,14 @@ func (r *Room[keyType]) Remove(conn *Conn) {
 // Thread-safe: Can be called concurrently with other room operations.
 func (r *Room[keyType]) RemoveAll() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.conns = make(map[*Conn]bool)
+	conns := r.conns               // copy
+	r.conns = make(map[*Conn]bool) // empty
+	r.mu.Unlock()
+
+	// calling hook
+	for c := range conns {
+		r.OnLeave(r, c)
+	}
 }
 
 // Move removes a connection from this room and adds it to another room.
