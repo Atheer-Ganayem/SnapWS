@@ -2,7 +2,6 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Atheer-Ganayem/SnapWS.svg)](https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS)
 ![License](https://img.shields.io/github/license/Atheer-Ganayem/SnapWS)
-![Status](https://img.shields.io/badge/status-in%20development-yellow)
 
 **SnapWS is a minimal WebSocket library for Go.**
 
