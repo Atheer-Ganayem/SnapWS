@@ -147,7 +147,7 @@ func broadcast(ctx context.Context, conns []*Conn, opcode uint8, data []byte, wo
 		go func() {
 			defer wg.Done()
 			for conn := range ch {
-				if ctx.Err() != nil {
+				if ctx != nil && ctx.Err() != nil {
 					return
 				}
 
@@ -160,7 +160,7 @@ func broadcast(ctx context.Context, conns []*Conn, opcode uint8, data []byte, wo
 
 	go func() {
 		for _, conn := range conns {
-			if ctx.Err() != nil {
+			if ctx != nil && ctx.Err() != nil {
 				break
 			}
 			ch <- conn
@@ -169,6 +169,11 @@ func broadcast(ctx context.Context, conns []*Conn, opcode uint8, data []byte, wo
 		wg.Wait()
 		close(done)
 	}()
+
+	if ctx == nil {
+		<-done
+		return int(n), nil
+	}
 
 	select {
 	case <-done:
