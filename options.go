@@ -23,6 +23,10 @@ const (
 	DefaultWriteBufferSize = 4096
 )
 
+func defaultBroadcastWorkers(n int) int {
+	return min(n, 20)
+}
+
 type Options struct {
 	// Ran before finalizing and accepting the handshake.
 	Middlwares []Middlware
@@ -70,7 +74,7 @@ type Options struct {
 
 	// BroadcastWorkers is an optional function to customize the number of workers
 	// used during broadcasting. It receives the number of connections and returns the desired worker count.
-	// If nil, the default is (connsLength / 10) + 2.
+	// If nil, the default is min(connsLength, 20).
 	BroadcastWorkers func(connsLength int) int
 
 	// BackpressureStrategy controls the behavior when the messages channel is full:
@@ -107,6 +111,10 @@ func (opt *Options) WithDefault() {
 	}
 	if opt.WriteBufferSize == 0 {
 		opt.WriteBufferSize = DefaultWriteBufferSize
+	}
+
+	if opt.BroadcastWorkers == nil {
+		opt.BroadcastWorkers = defaultBroadcastWorkers
 	}
 
 	// if !opt.BackpressureStrategy.Valid() {

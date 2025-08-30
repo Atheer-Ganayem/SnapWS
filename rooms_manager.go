@@ -44,6 +44,8 @@ type Room[keyType comparable] struct {
 	conns map[*Conn]bool
 	mu    sync.RWMutex
 
+	batcher *messageBatcher
+
 	// Called when a connection is added to the room.
 	//If not set it will default to "DefaultOnJoin" in the RoomManager.
 	OnJoin roomHook[keyType]
@@ -200,6 +202,9 @@ func (rm *RoomManager[keyType]) Shutdown() {
 // After calling Close, this room instance should not be used.
 func (r *Room[keyType]) Close() {
 	r.RemoveAll()
+	if r.batcher != nil {
+		r.batcher.Close()
+	}
 
 	r.rm.mu.Lock()
 	defer r.rm.mu.Unlock()
@@ -277,6 +282,29 @@ func (r *Room[keyType]) Move(conn *Conn, newRoom keyType) {
 	}
 }
 
+func (r *Room[keyType]) getConns(exclude ...*Conn) []*Conn {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.conns) == 0 {
+		return nil
+	}
+
+	conns := make([]*Conn, 0, len(r.conns))
+	for c := range r.conns {
+		if !slices.Contains(exclude, c) {
+			conns = append(conns, c)
+		}
+	}
+
+	return conns
+}
+
+// Just to satisfy the broadcaster interface in batcher.go
+func (r *Room[keyType]) getWorkersCount(n int) int {
+	return r.rm.Upgrader.BroadcastWorkers(n)
+}
+
 // broadcast sends a message to all connections in the room using worker goroutines.
 // This is an internal method used by BroadcastString and BroadcastBytes.
 //
@@ -287,30 +315,8 @@ func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
-	r.mu.RLock()
-	connsLength := len(r.conns)
-	if connsLength == 0 {
-		r.mu.RUnlock()
-		return 0, nil
-	}
-
-	// Create snapshot of connections to avoid holding lock during broadcast
-	conns := make([]*Conn, 0, len(r.conns))
-	for c := range r.conns {
-		if !slices.Contains(exclude, c) {
-			conns = append(conns, c)
-		}
-	}
-	r.mu.RUnlock()
-
-	// Determine number of worker goroutines for broadcasting
-	var workers int
-	if r.rm.Upgrader.BroadcastWorkers != nil {
-		workers = r.rm.Upgrader.BroadcastWorkers(connsLength)
-	}
-	if workers <= 0 {
-		workers = (connsLength / 10) + 2
-	}
+	conns := r.getConns(exclude...)
+	workers := r.getWorkersCount(len(conns))
 
 	return broadcast(ctx, conns, opcode, data, workers)
 }
