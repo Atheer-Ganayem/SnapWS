@@ -65,4 +65,8 @@ var (
 	ErrTimeout                 = errors.New("time out")
 
 	ErrPingAlreadySent = errors.New("ping already sent")
+
+	// Batcher errors
+	ErrBatcherUninitialized = errors.New("batcher uninitialized")
+	ErrBatcherClosed = errors.New("batcher closed")
 )

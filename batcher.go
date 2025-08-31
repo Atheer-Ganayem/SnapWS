@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -213,9 +212,9 @@ func (mb *messageBatcher) flush() {
 //   - error: nil on success, or an error describing why the message couldn't be batched
 func (r *Room[keyType]) Batch(data []byte) error {
 	if r.batcher == nil {
-		return errors.New("batcher unintialized")
+		return ErrBatcherUninitialized
 	} else if r.batcher.IsClosed() {
-		return errors.New("batcher is closed")
+		return ErrBatcherClosed
 	} else if r.batcher.ctx.Err() != nil {
 		return r.batcher.ctx.Err()
 	}
@@ -239,7 +238,7 @@ func (r *Room[keyType]) Batch(data []byte) error {
 //   - error: JSON marshaling error or batching error.
 func (r *Room[keyType]) BatchJSON(v interface{}) error {
 	if r.batcher == nil {
-		return errors.New("batcher unintialized")
+		return ErrBatcherUninitialized
 	}
 
 	data, err := json.Marshal(v)

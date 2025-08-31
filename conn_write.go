@@ -71,9 +71,10 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, e
 	if !isData(msgType) {
 		return nil, ErrInvalidOPCODE
 	}
-	if !conn.writer.closed {
-		return nil, ErrWriterNotClosed
-	}
+
+	// if !conn.writer.closed {
+	// 	return nil, ErrWriterNotClosed
+	// }
 
 	err := conn.writer.lock.lockCtx(ctx)
 	if err != nil {
