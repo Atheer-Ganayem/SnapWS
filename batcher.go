@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ const (
 	// StrategyLengthPrefix batches messages with 4-byte big-endian length prefixes before each message.
 	// Format: [uint32][message1][uint32][message2][uint32][message3]...
 	StrategyLengthPrefix
+
+	StrategyCustom
 )
 
 // broadcaster defines the interface for objects that can broadcast messages to multiple connections.
@@ -33,6 +36,12 @@ type broadcaster interface {
 //   - n: number of connections that successfully received the batch
 //   - err: any error that occurred during the flush operation (nil if successful)
 type OnFlushFunc func(n int, err error)
+
+type OnSendFunc func(ctx context.Context, conn *Conn, messages [][]byte) error
+
+func emptyOnSendFunc(ctx context.Context, conn *Conn, messages [][]byte) error {
+	return nil
+}
 
 // messageBatcher handles automatic batching and periodic flushing of messages to optimize
 // network performance by reducing the number of individual websocket writes.
@@ -58,7 +67,10 @@ type messageBatcher struct {
 	broadcaster broadcaster
 
 	// onFlush callback function executed after each flush operation.
-	onFlush func(n int, err error)
+	onFlush OnFlushFunc
+
+	// used when strategy is custom
+	onSend OnSendFunc
 }
 
 // newBatcher creates and initializes a new message batcher for the room with the specified configuration.
@@ -125,6 +137,20 @@ func (r *Room[keyType]) EnablePrefixBatching(ctx context.Context, flushEvery tim
 	}
 
 	r.batcher = newBatcher(ctx, r, StrategyLengthPrefix, flushEvery, onFlush)
+}
+
+// Custom batching
+func (r *Room[keyType]) EnableBatching(ctx context.Context, flushEvery time.Duration, onFlush OnFlushFunc, onSend OnSendFunc) {
+	if r.batcher != nil {
+		r.batcher.Close()
+	}
+
+	if onSend == nil {
+		onSend = emptyOnSendFunc
+	}
+
+	r.batcher = newBatcher(ctx, r, StrategyCustom, flushEvery, onFlush)
+	r.batcher.onSend = onSend
 }
 
 // Close gracefully shuts down the message batcher.
@@ -296,10 +322,15 @@ func (mb *messageBatcher) batchBroadcast(messages [][]byte) (int, error) {
 				}
 
 				var err error
-				if mb.strategy == StrategyJSON {
+				switch mb.strategy {
+				case StrategyJSON:
 					err = sendJSONStrategy(mb.ctx, conn, messages)
-				} else {
+				case StrategyLengthPrefix:
 					err = sendPrefixStrategy(mb.ctx, conn, messages)
+				case StrategyCustom:
+					err = mb.onSend(mb.ctx, conn, messages)
+				default:
+					panic(fmt.Errorf("unexpected strategy: %v", mb.strategy))
 				}
 
 				if err == nil {
