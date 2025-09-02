@@ -175,15 +175,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []b
 		return 0, nil
 	}
 
-	var workers int
-	if m.Upgrader.BroadcastWorkers != nil {
-		workers = m.Upgrader.BroadcastWorkers(connsLength)
-	}
-	if workers <= 0 {
-		workers = (connsLength / 10) + 2
-	}
-
-	return broadcast(ctx, conns, opcode, data, workers)
+	return m.Upgrader.broadcast(ctx, conns, opcode, data)
 }
 
 // broadcast sends a message to all active connections except the connection of key "exclude".

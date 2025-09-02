@@ -316,9 +316,8 @@ func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte
 	}
 
 	conns := r.getConns(exclude...)
-	workers := r.getWorkersCount(len(conns))
 
-	return broadcast(ctx, conns, opcode, data, workers)
+	return r.rm.Upgrader.broadcast(ctx, conns, opcode, data)
 }
 
 // BroadcastString sends a text message to all connections in the room.

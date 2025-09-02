@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"net"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -134,51 +132,4 @@ func (conn *Conn) skipRestOfMessage() error {
 	}
 
 	return nil
-}
-
-func broadcast(ctx context.Context, conns []*Conn, opcode uint8, data []byte, workers int) (int, error) {
-	var wg sync.WaitGroup
-	ch := make(chan *Conn, workers)
-	done := make(chan struct{})
-	var n int64
-
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for conn := range ch {
-				if ctx != nil && ctx.Err() != nil {
-					return
-				}
-
-				if err := conn.SendMessage(ctx, opcode, data); err == nil {
-					atomic.AddInt64(&n, 1)
-				}
-			}
-		}()
-	}
-
-	go func() {
-		for _, conn := range conns {
-			if ctx != nil && ctx.Err() != nil {
-				break
-			}
-			ch <- conn
-		}
-		close(ch)
-		wg.Wait()
-		close(done)
-	}()
-
-	if ctx == nil {
-		<-done
-		return int(n), nil
-	}
-
-	select {
-	case <-done:
-		return int(n), nil
-	case <-ctx.Done():
-		return int(n), ctx.Err()
-	}
 }

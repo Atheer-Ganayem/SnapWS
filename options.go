@@ -72,8 +72,22 @@ type Options struct {
 	// If false, such connections will be accepted as raw WebSocket connections.
 	RejectRaw bool
 
+	// PersistentBroadcastWorkers controls the broadcasting strategy.
+	// False by default.
+	//
+	// When false (default): Creates temporary workers per broadcast using
+	// BroadcastWorkers function, then destroys them after completion.
+	//
+	// When true: Creates one persistent worker per connection with a buffered
+	// channel. Workers and channels are cleaned up when connections close.
+	//
+	// Use false for low-medium broadcast frequency and when you need broadcast results.
+	// Use true for high-frequency broadcasting where performance matters most.
+	PersistentBroadcastWorkers bool
+
 	// BroadcastWorkers is an optional function to customize the number of workers
-	// used during broadcasting. It receives the number of connections and returns the desired worker count.
+	// used during broadcasting WHEN "PersistentBroadcastWorkers" option is FALSE.
+	// It receives the number of connections and returns the desired worker count.
 	// If nil, the default is min(connsLength, 20).
 	BroadcastWorkers func(connsLength int) int
 

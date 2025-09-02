@@ -321,19 +321,7 @@ func (mb *messageBatcher) batchBroadcast(messages [][]byte) (int, error) {
 					return
 				}
 
-				var err error
-				switch mb.strategy {
-				case StrategyJSON:
-					err = sendJSONStrategy(mb.ctx, conn, messages)
-				case StrategyLengthPrefix:
-					err = sendPrefixStrategy(mb.ctx, conn, messages)
-				case StrategyCustom:
-					err = mb.onSend(mb.ctx, conn, messages)
-				default:
-					panic(fmt.Errorf("unexpected strategy: %v", mb.strategy))
-				}
-
-				if err == nil {
+				if err := mb.send(conn, messages); err == nil {
 					atomic.AddInt64(&n, 1)
 				}
 			}
@@ -363,6 +351,22 @@ func (mb *messageBatcher) batchBroadcast(messages [][]byte) (int, error) {
 	case <-mb.ctx.Done():
 		return int(n), mb.ctx.Err()
 	}
+}
+
+func (mb *messageBatcher) send(conn *Conn, messages [][]byte) error {
+	var err error
+	switch mb.strategy {
+	case StrategyJSON:
+		err = sendJSONStrategy(mb.ctx, conn, messages)
+	case StrategyLengthPrefix:
+		err = sendPrefixStrategy(mb.ctx, conn, messages)
+	case StrategyCustom:
+		err = mb.onSend(mb.ctx, conn, messages)
+	default:
+		panic(fmt.Errorf("unexpected strategy: %v", mb.strategy))
+	}
+
+	return err
 }
 
 // sendJSONStrategy encodes messages as a JSON array and sends them via websocket binary message.

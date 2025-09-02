@@ -43,6 +43,12 @@ type Conn struct {
 	controlWriter *ControlWriter
 	writeLock     *mu
 	readBuf       *bufio.Reader
+
+	// gotta think what type to receive
+	// we need to receive: ctx, payload, opcode, workers...
+	// ok we need two seperate channels
+	broadcast chan *broadcastTask
+	batch chan *batchTask
 }
 
 func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb []byte) *Conn {
