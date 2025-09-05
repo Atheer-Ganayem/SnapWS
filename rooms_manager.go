@@ -334,57 +334,29 @@ func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte, exclude
 	return r.broadcast(ctx, OpcodeBinary, data, exclude...)
 }
 
-// BatchBroadcast loops over the room's connections and adds the givcen data into their batch.
+// BatchBroadcast loops over the room's connections and adds the given data into their batch.
 //
-// Return an error, if the error is non-nil: ErrBatchingUninitialized, ErrFlusherClosed, flusher context errror.
-func (r *Room[keyType]) BatchBroadcast(data []byte, exclude ...*Conn) error {
-	if r.rm.Upgrader.Flusher == nil {
-		return ErrBatchingUninitialized
-	}
-
+// Returns:
+//   - int: number of connections that successfully received the message in thier
+//     queue (doesnt necessarily mean they sent/batched it successfully)
+//   - error: context cancellation error, flusher errors, or nil if completed normally
+func (r *Room[keyType]) BatchBroadcast(ctx context.Context, data []byte, exclude ...*Conn) (int, error) {
 	conns := r.GetAllConns(exclude...)
 
-	m := &batchMessage{data: data}
-
-	for _, conn := range conns {
-		select {
-		case <-r.rm.Upgrader.Flusher.closed:
-			return ErrFlusherClosed
-		case <-r.rm.Upgrader.Flusher.ctx.Done():
-			return r.rm.Upgrader.Flusher.ctx.Err()
-		case conn.broadcastQueue <- m:
-
-		default:
-			switch r.rm.Upgrader.BroadcastBackpressure {
-			case BackpressureDrop: // drop
-			case BackpressureClose:
-				go conn.CloseWithCode(ClosePolicyViolation, "client too slow")
-			case BackpressureWait:
-				// wait till sent
-				select {
-				case <-r.rm.Upgrader.Flusher.closed:
-					return ErrFlusherClosed
-				case <-r.rm.Upgrader.Flusher.ctx.Done():
-					return r.rm.Upgrader.Flusher.ctx.Err()
-				case conn.broadcastQueue <- m:
-				}
-			default:
-				panic(fmt.Errorf("unexpected backpressure strategy: %v", r.rm.Upgrader.BroadcastBackpressure))
-			}
-		}
-	}
-
-	return nil
+	return r.rm.Upgrader.batchBroadcast(ctx, conns, data)
 }
 
 // BatchBroadcastJSON is just a helper method that marshals the given v into json and calls BatchBraodcast.
 //
-// Return an error, if the error is non-nil: marshal error, ErrBatchingUninitialized, ErrFlusherClosed. flusher context errror.
-func (r *Room[keyType]) BatchBroadcastJSON(v interface{}, exclude ...*Conn) error {
+// Returns:
+//   - int: number of connections that successfully received the message in thier
+//     queue (doesnt necessarily mean they sent/batched it successfully)
+//   - error: context cancellation error, mrashal error, flusher errors, or nil if completed normally
+func (r *Room[keyType]) BatchBroadcastJSON(ctx context.Context, v interface{}, exclude ...*Conn) (int, error) {
 	jData, err := json.Marshal(v)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	return r.BatchBroadcast(jData, exclude...)
+	return r.BatchBroadcast(ctx, jData, exclude...)
 }
