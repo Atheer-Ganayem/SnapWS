@@ -22,6 +22,7 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 - ✅ Connection manager (useful when communicating between different clients like chat apps).
 - ✅ Room manager.
 - ✅ Rate limiter.
+- ✅ Message batching. (New)
 - ✅ Written completely in standard library amd Go offical libraries, no external libraries imported.
 - ✅ Support for middlewares and connect/disconnect hooks.
 
