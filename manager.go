@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -213,4 +214,31 @@ func (m *Manager[KeyType]) Shutdown() {
 	wg.Wait()
 
 	m.conns = make(map[KeyType]*ManagedConn[KeyType])
+}
+
+// BatchBroadcast loops over the manager's connections and adds the given data into their batch.
+//
+// Returns:
+//   - int: number of connections that successfully received the message in thier
+//     queue (doesnt necessarily mean they sent/batched it successfully)
+//   - error: context cancellation error, flusher errors, or nil if completed normally
+func (m *Manager[KeyType]) BatchBroadcast(ctx context.Context, data []byte, exclude ...KeyType) (int, error) {
+	conns := m.GetAllConnsAsConn(exclude...)
+
+	return m.Upgrader.batchBroadcast(ctx, conns, data)
+}
+
+// BatchBroadcastJSON is just a helper method that marshals the given v into json and calls BatchBraodcast.
+//
+// Returns:
+//   - int: number of connections that successfully received the message in thier
+//     queue (doesnt necessarily mean they sent/batched it successfully)
+//   - error: context cancellation error, mrashal error, flusher errors, or nil if completed normally
+func (m *Manager[KeyType]) BatchBroadcastJSON(ctx context.Context, v interface{}, exclude ...KeyType) (int, error) {
+	jData, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+
+	return m.BatchBroadcast(ctx, jData, exclude...)
 }
