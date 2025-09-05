@@ -91,3 +91,58 @@ func (u *Upgrader) broadcast(ctx context.Context, conns []*Conn, opcode uint8, d
 
 	return n, nil
 }
+
+// broadcast creates a message queues it to the given conns as a batch message.
+// If a connection queue if full, this method will handle it according to the upgrader's
+// "BroadcastBackpressure" option. Look at "Options" struct for more info.
+//
+// The broadcasting respects context cancellation and will terminate early if the context
+// is cancelled during the operation.
+//
+// Returns:
+//   - int: number of connections that successfully received the message in thier
+//     queue (doesnt necessarily mean they sent/batched it successfully)
+//   - error: context cancellation error, or nil if completed normally
+func (u *Upgrader) batchBroadcast(ctx context.Context, conns []*Conn, data []byte) (n int, err error) {
+	if u.Flusher == nil {
+		return 0, ErrBatchingUninitialized
+	}
+
+	m := &batchMessage{data: data}
+
+	for _, conn := range conns {
+		select {
+		case <-u.Flusher.closed:
+			return n, ErrFlusherClosed
+		case <-u.Flusher.ctx.Done():
+			return n, u.Flusher.ctx.Err()
+		case <-ctx.Done():
+			return n, ctx.Err()
+		case conn.broadcastQueue <- m:
+			n++
+
+		default:
+			switch u.BroadcastBackpressure {
+			case BackpressureDrop: // drop
+			case BackpressureClose:
+				go conn.CloseWithCode(ClosePolicyViolation, "client too slow")
+			case BackpressureWait:
+				// wait till sent
+				select {
+				case <-u.Flusher.closed:
+					return n, ErrFlusherClosed
+				case <-u.Flusher.ctx.Done():
+					return n, u.Flusher.ctx.Err()
+				case <-ctx.Done():
+					return n, ctx.Err()
+				case conn.broadcastQueue <- m:
+					n++
+				}
+			default:
+				panic(fmt.Errorf("unexpected backpressure strategy: %v", u.BroadcastBackpressure))
+			}
+		}
+	}
+
+	return n, nil
+}
