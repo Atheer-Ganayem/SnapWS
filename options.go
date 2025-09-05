@@ -5,27 +5,29 @@ import (
 	"time"
 )
 
-// type BackpressureStrategy int
+type BackpressureStrategy int
 
-// const (
-// 	BackpressureClose BackpressureStrategy = iota
-// 	BackpressureDrop
-// 	BackpressureWait
-// )
+const (
+	// Drops the message without closing the connection.
+	BackpressureDrop = iota
+	// Drops and closes the connection.
+	BackpressureClose
+	// Blocks until the message is sent.
+	//
+	// Not recommended to use excpet for very very special cases.
+	BackpressureWait
+)
 
 const (
 	defaultWriteWait = time.Second * 5
 	defaultReadWait  = time.Minute
 	defaultPingEvery = time.Second * 50
 
-	DefaultMaxMessageSize  = 1 << 20 // 1MB
-	DefaultReadBufferSize  = 4096
-	DefaultWriteBufferSize = 4096
+	DefaultMaxMessageSize        = 1 << 20 // 1MB
+	DefaultReadBufferSize        = 4096
+	DefaultWriteBufferSize       = 4096
+	DefaultBroadcastChannelsSize = 8
 )
-
-func defaultBroadcastWorkers(n int) int {
-	return min(n, 20)
-}
 
 type Options struct {
 	// Ran before finalizing and accepting the handshake.
@@ -55,7 +57,7 @@ type Options struct {
 	// if not set it will use the default http buffer (4kb)
 	WriteBufferSize int
 
-	//Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
+	// Buffer pooling can reduce GC pressure in workloads with large messages and very high throughput,
 	// but may increase latency in some scenarios. Enabled by default.
 	DisableWriteBuffersPooling bool
 
@@ -72,33 +74,16 @@ type Options struct {
 	// If false, such connections will be accepted as raw WebSocket connections.
 	RejectRaw bool
 
-	// PersistentBroadcastWorkers controls the broadcasting strategy.
-	// False by default.
+	// Defines the size of the buffered channel per connection that receive broadcast messages.
 	//
-	// When false (default): Creates temporary workers per broadcast using
-	// BroadcastWorkers function, then destroys them after completion.
-	//
-	// When true: Creates one persistent worker per connection with a buffered
-	// channel. Workers and channels are cleaned up when connections close.
-	//
-	// Use false for low-medium broadcast frequency and when you need broadcast results.
-	// Use true for high-frequency broadcasting where performance matters most.
-	PersistentBroadcastWorkers bool
-
-	// BroadcastWorkers is an optional function to customize the number of workers
-	// used during broadcasting WHEN "PersistentBroadcastWorkers" option is FALSE.
-	// It receives the number of connections and returns the desired worker count.
-	// If nil, the default is min(connsLength, 20).
-	BroadcastWorkers func(connsLength int) int
-
-	// BackpressureStrategy controls the behavior when the messages channel is full:
-	// 	- snapws.BackpressureClose (default): when the messages channel is full the connection will close.
-	// 	- snapws.BackpressureDrop: when the messages channel is full the message will be droped.
-	// 	- snapws.BackpressureWait: when the messages channel is full the reading loop will block
+	// Default is 8.
+	BroadcastChannelsSize int
+	// BackpressureStrategy controls the behavior when the per-conn broadcast channel is full:
+	// 	- snapws.BackpressureDrop (default): when the channel is full the message will be droped.
+	// 	- snapws.BackpressureClose: when the channel is full the connection will close.
+	// 	- snapws.BackpressureWait (not recommended): when the channel is full the reading loop will block
 	// 	until it succeeds to send the message.
-	//
-	// Note: when the inobundFrames channel is full, the connection will be closed.
-	// BackpressureStrategy BackpressureStrategy
+	BroadcastBackpressure BackpressureStrategy
 
 	// SkipUTF8Validation disables UTF-8 validation for text frames.
 	// if UTF8 validtion is enabled, the library would be validating text messages only when
@@ -108,6 +93,12 @@ type Options struct {
 	// you can disable it.
 	// Default: false (validation enabled)
 	SkipUTF8Validation bool
+
+	// If not set it will default to DefaultMaxMessageSize (1MB).
+	//
+	// Max size of the batched messages. For instance, you have 3 batched messages each of size 4kb,
+	// the batch is of size 12kb < 1MB.
+	MaxBatchSize int
 }
 
 func (opt *Options) WithDefault() {
@@ -126,28 +117,14 @@ func (opt *Options) WithDefault() {
 	if opt.WriteBufferSize == 0 {
 		opt.WriteBufferSize = DefaultWriteBufferSize
 	}
-
-	if opt.BroadcastWorkers == nil {
-		opt.BroadcastWorkers = defaultBroadcastWorkers
+	if opt.BroadcastChannelsSize == 0 {
+		opt.BroadcastChannelsSize = DefaultBroadcastChannelsSize
 	}
 
-	// if !opt.BackpressureStrategy.Valid() {
-	// 	opt.BackpressureStrategy = BackpressureClose
-	// }
+	if opt.MaxBatchSize == 0 {
+		opt.MaxBatchSize = DefaultMaxMessageSize
+	}
 }
-
-// func (s BackpressureStrategy) Valid() bool {
-// 	switch s {
-// 	case BackpressureClose:
-// 		return true
-// 	case BackpressureDrop:
-// 		return true
-// 	case BackpressureWait:
-// 		return true
-// 	default:
-// 		return false
-// 	}
-// }
 
 type Middlwares []Middlware
 

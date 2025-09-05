@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -12,16 +13,13 @@ var rm *snapws.RoomManager[string]
 
 func main() {
 	rm = snapws.NewRoomManager[string](snapws.NewUpgrader(&snapws.Options{
-		SkipUTF8Validation: true,
-		BroadcastWorkers: func(connsLength int) int {
-			return connsLength
-		},
+		SkipUTF8Validation:    true,
+		BroadcastBackpressure: snapws.BackpressureWait,
+		MaxBatchSize:          11,
 	}))
+	rm.Upgrader.EnableJSONBatching(context.TODO(), time.Second*5)
 	defer rm.Shutdown()
-
-	rm.Add("normal")
-	r := rm.Add("batch")
-	// r.EnableBatching(nil, time.Second, nil, func(ctx context.Context, conn *snapws.Conn, messages [][]byte) error {
+	// rm.Upgrader.EnableBatching(nil, time.Second*5, func(ctx context.Context, conn *snapws.Conn, messages [][]byte) error {
 	// 	w, err := conn.NextWriter(ctx, snapws.OpcodeText)
 	// 	if err != nil {
 	// 		return err
@@ -47,7 +45,6 @@ func main() {
 
 	// 	return nil
 	// })
-	r.EnableJSONBatching(nil, time.Millisecond*50, nil)
 
 	http.HandleFunc("/normal", normal)
 	http.HandleFunc("/batch", batch)
@@ -73,11 +70,10 @@ func normal(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		go func() {
-			if n, err := room.BroadcastString(nil, data); err != nil {
-				fmt.Println("boradcast faild:", n, err)
-			}
-		}()
+		n, err := room.BroadcastString(nil, data)
+		if err != nil {
+			fmt.Println("boradcast faild:", n, err)
+		}
 	}
 }
 
@@ -98,7 +94,7 @@ func batch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := room.BatchJSON(data); err != nil {
+		if err := room.BatchBroadcastJSON(string(data)); err != nil {
 			fmt.Println(err)
 		}
 	}

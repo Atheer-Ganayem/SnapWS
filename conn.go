@@ -44,11 +44,9 @@ type Conn struct {
 	writeLock     *mu
 	readBuf       *bufio.Reader
 
-	// gotta think what type to receive
-	// we need to receive: ctx, payload, opcode, workers...
-	// ok we need two seperate channels
-	broadcast chan *broadcastTask
-	batch chan *batchTask
+	broadcastQueue chan message
+
+	batch *messageBatch
 }
 
 func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb []byte) *Conn {
@@ -81,9 +79,23 @@ func (u *Upgrader) newConn(c net.Conn, subProtocol string, br *bufio.Reader, wb 
 	conn.writer = conn.newWriter(wb)
 	conn.controlWriter = conn.newControlWriter()
 
+	if u.Flusher != nil {
+		conn.batch = u.Flusher.newBatch(conn)
+	}
+
 	go conn.pingLoop()
 
 	return conn
+}
+
+func (conn *Conn) enableBroadcasting() {
+	if conn.broadcastQueue != nil {
+		return
+	}
+
+	conn.broadcastQueue = make(chan message, conn.upgrader.BroadcastChannelsSize)
+
+	go conn.broadcastListener()
 }
 
 // ManagedConn is a Conn that is tracked by a Manager.
@@ -215,6 +227,10 @@ func (conn *Conn) CloseWithCode(code uint16, reason string) {
 		// remove from rate limiter if exists
 		if conn.upgrader.Limiter != nil {
 			conn.upgrader.Limiter.removeClient(conn)
+		}
+
+		if conn.upgrader.Flusher != nil {
+			conn.upgrader.Flusher.remove(conn)
 		}
 	})
 }

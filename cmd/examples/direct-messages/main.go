@@ -57,7 +57,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if targetConn, ok := manager.GetConn(msg.To); ok {
+		if targetConn := manager.Get(msg.To); targetConn != nil {
 			rm := receivedMsg{Text: fmt.Sprintf("%s: %s", name, msg.Text), From: name}
 			if err := targetConn.SendJSON(context.TODO(), rm); err != nil {
 				fmt.Printf("error sending message from %s to %s: %v\n", name, msg.To, err)
@@ -71,7 +71,7 @@ func rejectDuplicateNames(w http.ResponseWriter, r *http.Request) error {
 	if name == "" {
 		return snapws.NewMiddlewareErr(http.StatusBadRequest, "username cannot be empty.")
 	}
-	_, exists := manager.GetConn(name)
+	exists := manager.Get(name) != nil
 	if exists {
 		return snapws.NewMiddlewareErr(http.StatusBadRequest, "username already exists, choose another one.")
 	}

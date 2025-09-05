@@ -19,6 +19,7 @@ type Upgrader struct {
 	*Options
 	writePool sync.Pool
 	Limiter   *RateLimiter
+	Flusher   *batchFlusher
 }
 
 // Created a new upgrader with the given options.

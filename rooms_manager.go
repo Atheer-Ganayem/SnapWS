@@ -2,6 +2,7 @@ package snapws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -43,8 +44,6 @@ type Room[keyType comparable] struct {
 
 	conns map[*Conn]bool
 	mu    sync.RWMutex
-
-	batcher *messageBatcher
 
 	// Called when a connection is added to the room.
 	//If not set it will default to "DefaultOnJoin" in the RoomManager.
@@ -202,9 +201,6 @@ func (rm *RoomManager[keyType]) Shutdown() {
 // After calling Close, this room instance should not be used.
 func (r *Room[keyType]) Close() {
 	r.RemoveAll()
-	if r.batcher != nil {
-		r.batcher.Close()
-	}
 
 	r.rm.mu.Lock()
 	defer r.rm.mu.Unlock()
@@ -230,6 +226,7 @@ func (r *Room[keyType]) Add(conn *Conn, args ...any) {
 	}
 	conn.onCloseMu.Unlock()
 
+	conn.enableBroadcasting()
 	// calling onJoin hook
 	if r.OnJoin != nil {
 		r.OnJoin(r, conn, args...)
@@ -248,7 +245,7 @@ func (r *Room[keyType]) Remove(conn *Conn, args ...any) {
 	r.mu.Unlock()
 
 	// calling onLeave hook
-	if r.OnJoin != nil {
+	if r.OnLeave != nil {
 		r.OnLeave(r, conn, args...)
 	}
 }
@@ -282,7 +279,9 @@ func (r *Room[keyType]) Move(conn *Conn, newRoom keyType) {
 	}
 }
 
-func (r *Room[keyType]) getConns(exclude ...*Conn) []*Conn {
+// Receives optional values "exclude".
+// Returns a slice of pointers to connections excluding the "excludes".
+func (r *Room[keyType]) GetAllConns(exclude ...*Conn) []*Conn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -300,11 +299,6 @@ func (r *Room[keyType]) getConns(exclude ...*Conn) []*Conn {
 	return conns
 }
 
-// Just to satisfy the broadcaster interface in batcher.go
-func (r *Room[keyType]) getWorkersCount(n int) int {
-	return r.rm.Upgrader.BroadcastWorkers(n)
-}
-
 // broadcast sends a message to all connections in the room using worker goroutines.
 // This is an internal method used by BroadcastString and BroadcastBytes.
 //
@@ -315,7 +309,7 @@ func (r *Room[keyType]) broadcast(ctx context.Context, opcode uint8, data []byte
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
-	conns := r.getConns(exclude...)
+	conns := r.GetAllConns(exclude...)
 
 	return r.rm.Upgrader.broadcast(ctx, conns, opcode, data)
 }
@@ -338,4 +332,59 @@ func (r *Room[keyType]) BroadcastString(ctx context.Context, data []byte, exclud
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte, exclude ...*Conn) (int, error) {
 	return r.broadcast(ctx, OpcodeBinary, data, exclude...)
+}
+
+// BatchBroadcast loops over the room's connections and adds the givcen data into their batch.
+//
+// Return an error, if the error is non-nil: ErrBatchingUninitialized, ErrFlusherClosed, flusher context errror.
+func (r *Room[keyType]) BatchBroadcast(data []byte, exclude ...*Conn) error {
+	if r.rm.Upgrader.Flusher == nil {
+		return ErrBatchingUninitialized
+	}
+
+	conns := r.GetAllConns(exclude...)
+
+	m := &batchMessage{data: data}
+
+	for _, conn := range conns {
+		select {
+		case <-r.rm.Upgrader.Flusher.closed:
+			return ErrFlusherClosed
+		case <-r.rm.Upgrader.Flusher.ctx.Done():
+			return r.rm.Upgrader.Flusher.ctx.Err()
+		case conn.broadcastQueue <- m:
+
+		default:
+			switch r.rm.Upgrader.BroadcastBackpressure {
+			case BackpressureDrop: // drop
+			case BackpressureClose:
+				go conn.CloseWithCode(ClosePolicyViolation, "client too slow")
+			case BackpressureWait:
+				// wait till sent
+				select {
+				case <-r.rm.Upgrader.Flusher.closed:
+					return ErrFlusherClosed
+				case <-r.rm.Upgrader.Flusher.ctx.Done():
+					return r.rm.Upgrader.Flusher.ctx.Err()
+				case conn.broadcastQueue <- m:
+				}
+			default:
+				panic(fmt.Errorf("unexpected backpressure strategy: %v", r.rm.Upgrader.BroadcastBackpressure))
+			}
+		}
+	}
+
+	return nil
+}
+
+// BatchBroadcastJSON is just a helper method that marshals the given v into json and calls BatchBraodcast.
+//
+// Return an error, if the error is non-nil: marshal error, ErrBatchingUninitialized, ErrFlusherClosed. flusher context errror.
+func (r *Room[keyType]) BatchBroadcastJSON(v interface{}, exclude ...*Conn) error {
+	jData, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	return r.BatchBroadcast(jData, exclude...)
 }

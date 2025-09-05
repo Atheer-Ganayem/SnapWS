@@ -66,7 +66,7 @@ var (
 
 	ErrPingAlreadySent = errors.New("ping already sent")
 
-	// Batcher errors
-	ErrBatcherUninitialized = errors.New("batcher uninitialized")
-	ErrBatcherClosed = errors.New("batcher closed")
+	// Batch errors
+	ErrBatchingUninitialized = errors.New("uninitialized flusher or message batch")
+	ErrFlusherClosed         = errors.New("flusher closed")
 )

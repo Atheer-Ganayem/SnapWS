@@ -46,7 +46,7 @@ func NewManager[KeyType comparable](u *Upgrader) *Manager[KeyType] {
 	return m
 }
 
-// Connect does 3 things:
+// Connect does 2 things:
 //   - Upgrades the connection.
 //   - connect the user to the manager & runs the hooks.
 //
@@ -77,6 +77,7 @@ func (m *Manager[KeyType]) Register(key KeyType, conn *ManagedConn[KeyType]) {
 	m.conns[key] = conn
 	m.mu.Unlock()
 
+	conn.enableBroadcasting()
 	if m.OnRegister != nil {
 		m.OnRegister(conn)
 	}
@@ -102,36 +103,20 @@ func (m *Manager[KeyType]) unregister(id KeyType) error {
 	return nil
 }
 
-// Receives a key, returns a pointer to the connection associated with the key and a bool.
-// If the connection exists, it will return a pointer to it and a true value.
-// If the connection deosn't exists, it will return nil and a false value.
-func (m *Manager[KeyType]) GetConn(key KeyType) (*ManagedConn[KeyType], bool) {
+// Receives a key, returns a pointer to the connection associated with the key.
+// If the connection exists, it will return a pointer to it.
+// If the connection deosn't exists, it will return a nil pointer.
+func (m *Manager[KeyType]) Get(key KeyType) *ManagedConn[KeyType] {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	conn, ok := m.conns[key]
-
-	return conn, ok
+	return m.conns[key]
 }
 
-// Get all connections associated with the manager as a slice of pointers.
-func (m *Manager[KeyType]) GetAllConns() []*ManagedConn[KeyType] {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// Get all connections associated with the manager as a slice of pointers to a ManagedConn
 
-	conns := make([]*ManagedConn[KeyType], 0, len(m.conns))
-	for _, v := range m.conns {
-		conns = append(conns, v)
-	}
-	return conns
-}
-
-// Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
-func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude ...KeyType) []*ManagedConn[KeyType] {
-	if len(exclude) == 0 {
-		return m.GetAllConns()
-	}
-
+// except the conns that appear in "exclude".
+func (m *Manager[KeyType]) GetAllConns(exclude ...KeyType) []*ManagedConn[KeyType] {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -144,8 +129,9 @@ func (m *Manager[KeyType]) GetAllConnsWithExclude(exclude ...KeyType) []*Managed
 	return conns
 }
 
-// Get all connections associated with the manager as a slice of pointers except the conn of key "exclude".
-func (m *Manager[KeyType]) GetAllConnsWithExcludeAsConn(exclude ...KeyType) []*Conn {
+// Get all connections associated with the manager as a slice of pointers to a conn
+// except the conn that appear in "exclude".
+func (m *Manager[KeyType]) GetAllConnsAsConn(exclude ...KeyType) []*Conn {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -169,7 +155,7 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []b
 		return 0, fmt.Errorf("%w: must be text or binary", ErrInvalidOPCODE)
 	}
 
-	conns := m.GetAllConnsWithExcludeAsConn(exclude...)
+	conns := m.GetAllConnsAsConn(exclude...)
 	connsLength := len(conns)
 	if connsLength == 0 {
 		return 0, nil
