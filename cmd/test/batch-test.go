@@ -15,7 +15,7 @@ func main() {
 	rm = snapws.NewRoomManager[string](snapws.NewUpgrader(&snapws.Options{
 		SkipUTF8Validation:    true,
 		BroadcastBackpressure: snapws.BackpressureWait,
-		MaxBatchSize:          11,
+		// MaxBatchSize:          11,
 	}))
 	rm.Upgrader.EnableJSONBatching(context.TODO(), time.Second*5)
 	defer rm.Shutdown()
@@ -94,7 +94,7 @@ func batch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := room.BatchBroadcastJSON(string(data)); err != nil {
+		if _, err := room.BatchBroadcastJSON(context.TODO(), string(data)); err != nil {
 			fmt.Println(err)
 		}
 	}
