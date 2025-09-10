@@ -152,6 +152,19 @@ func (rm *RoomManager[keyType]) Get(key keyType) *Room[keyType] {
 	return rm.rooms[key]
 }
 
+// GetRoomKeys returns a slice of all rooms keys associated with the room manager.
+func (rm *RoomManager[keyType]) GetRoomKeys() []keyType {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	keys := make([]keyType, 0, len(rm.rooms))
+	for k := range rm.rooms {
+		keys = append(keys, k)
+	}
+
+	return keys
+}
+
 // Shutdown closes all rooms and their connections.
 // This should be called when shutting down the application to ensure
 // all WebSocket connections are properly closed.
