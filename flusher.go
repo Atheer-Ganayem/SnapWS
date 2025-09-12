@@ -52,11 +52,11 @@ type batchFlusher struct {
 	// This is an optional function.
 	//
 	// The returned data will appended at the begining of the batch.
-	PrefixFunc PrefixSuffixFunc
+	BatchPrefixFunc PrefixSuffixFunc
 	// This is an optional function.
 	//
 	// The returned data will appended at the end of the batch.
-	SuffixFunc PrefixSuffixFunc
+	BatchSuffixFunc PrefixSuffixFunc
 }
 
 // newFlusher creates and initializes a new batchFlusher for the room with the specified configuration.

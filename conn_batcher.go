@@ -126,11 +126,11 @@ type batchEncoder func(w *ConnWriter, messages [][]byte, prefixData []byte, suff
 func (b *messageBatch) sendWrapper(messages [][]byte, encoder batchEncoder) error {
 	// extracting the prefix and suffex data before acquiring the writer.
 	var s, p []byte
-	if b.flusher.PrefixFunc != nil {
-		p = b.flusher.PrefixFunc(b.conn, messages)
+	if b.flusher.BatchPrefixFunc != nil {
+		p = b.flusher.BatchPrefixFunc(b.conn, messages)
 	}
-	if b.flusher.SuffixFunc != nil {
-		s = b.flusher.SuffixFunc(b.conn, messages)
+	if b.flusher.BatchSuffixFunc != nil {
+		s = b.flusher.BatchSuffixFunc(b.conn, messages)
 	}
 
 	w, err := b.conn.NextWriter(b.flusher.ctx, OpcodeBinary)
