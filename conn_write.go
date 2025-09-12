@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"time"
-	"unicode/utf8"
 )
 
 // ConnWriter is NOT safe for concurrent use.
@@ -72,10 +71,6 @@ func (conn *Conn) NextWriter(ctx context.Context, msgType uint8) (*ConnWriter, e
 		return nil, ErrInvalidOPCODE
 	}
 
-	// if !conn.writer.closed {
-	// 	return nil, ErrWriterNotClosed
-	// }
-
 	err := conn.writer.lock.lockCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -98,7 +93,7 @@ func (w *ConnWriter) Write(p []byte) (n int, err error) {
 
 	for n < len(p) {
 		if w.used == len(w.buf) {
-			if err := w.Flush(false); err != nil {
+			if err := w.flush(false); err != nil {
 				return n, err
 			}
 		}
@@ -114,18 +109,23 @@ func (w *ConnWriter) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-// Flush sends the current buffer as a WebSocket frame.
-// If FIN is true, this frame is marked as the final one in the message.
+// flush sends the current buffer as a WebSocket frame with FIN set to false.
+// If you want to end the message (FIN=true), you have to use the Close() method of the writer.
 //
 // Return values:
-//   - If it returns a **fatal error**, the connection is closed and cannot be reused.
-//   - If it returns a **non-fatal, non-nil error**, the connection is still alive,
+//   - If it returns a fatal error, the connection is closed and cannot be reused.
+//   - If it returns a non-fatal, non-nil error, the connection is still alive,
 //     and you may attempt to flush again.
 //     note: If err == context.Canceled or DeadlineExceeded, connection is alive but ctx is done.
 //     No point in retrying.
-//   - If it returns **nil**, the flush was successful, and the buffer's "start" and "used"
-//     positions have been reset.
-func (w *ConnWriter) Flush(FIN bool) error {
+//   - If it returns nil, the flush was successful and the message has been sent.
+func (w *ConnWriter) Flush() error {
+	return w.flush(false)
+}
+
+// flush sends the current buffer as a WebSocket frame.
+// If FIN is true, this frame is marked as the final one in the message.
+func (w *ConnWriter) flush(FIN bool) error {
 	if w == nil {
 		return ErrWriterUnintialized
 	}
@@ -172,7 +172,7 @@ func (w *ConnWriter) Close() error {
 	if !w.closed {
 		defer w.lock.tryUnlock()
 		defer func() { w.closed = true }()
-		err := w.Flush(true)
+		err := w.flush(true)
 		return err
 	}
 	return nil
@@ -196,12 +196,6 @@ func (conn *Conn) sendFrame(buf []byte) error {
 func (conn *Conn) SendMessage(ctx context.Context, opcode uint8, b []byte) error {
 	if !isData(opcode) {
 		return ErrInvalidOPCODE
-	}
-
-	if opcode == OpcodeText && !conn.upgrader.SkipUTF8Validation {
-		if ok := utf8.Valid(b); !ok {
-			return ErrInvalidUTF8
-		}
 	}
 
 	w, err := conn.NextWriter(ctx, opcode)
@@ -229,7 +223,9 @@ func (conn *Conn) SendBytes(ctx context.Context, p []byte) error {
 
 // SendString sends the given byte slice as a WebSocket binary message.
 //
-// The byte slice must be valid UTF-8. If it is not, the method returns snapws.ErrInvalidUTF8.
+// The Websocket protocl states that text messages must be a valid UTF-8,
+// but SnapWS doesnt enforce UTF-8 validation in send methods even if SkipUTF8Validation is set to false.
+// You're trusted to send valid data.
 //
 // This is a shorthand for SendMessage with OpcodeText.
 // The returned error must be checked. If it's a snapws.FatalError,
