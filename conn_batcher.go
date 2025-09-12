@@ -100,21 +100,14 @@ func (b *messageBatch) flush() {
 	go b.send(c)
 }
 
-// Pre-allocated byte slices for JSON array formatting to avoid allocations during batching.
-var (
-	openBracket    = []byte{'['}
-	closingBracket = []byte{']'}
-	comma          = []byte{','}
-)
-
 // receives the connections slice and the messages and calls the appropriate send function.
 func (b *messageBatch) send(messages [][]byte) error {
 	var err error
 	switch b.flusher.strategy {
 	case StrategyJSON:
-		err = b.sendJSONStrategy(messages)
+		err = b.sendWrapper(messages, jsonArrayEncoder)
 	case StrategyLengthPrefix:
-		err = b.sendPrefixStrategy(messages)
+		err = b.sendWrapper(messages, lengthPrefixEncoder)
 	case StrategyCustom:
 		err = b.flusher.customSend(b.flusher.ctx, b.conn, messages)
 	default:
@@ -124,35 +117,30 @@ func (b *messageBatch) send(messages [][]byte) error {
 	return err
 }
 
-// sendJSONStrategy encodes messages as a JSON array and sends them via websocket binary message.
-//
-// The messages are written as: [message1,message2,message3,...]
-// Each message is assumed to be valid JSON and is written directly without re-encoding.
-func (b *messageBatch) sendJSONStrategy(messages [][]byte) error {
+// ################################
+// Internal encoding/send functions
+// ################################
+
+type batchEncoder func(w *ConnWriter, messages [][]byte, prefixData []byte, suffixData []byte) error
+
+func (b *messageBatch) sendWrapper(messages [][]byte, encoder batchEncoder) error {
+	// extracting the prefix and suffex data before acquiring the writer.
+	var s, p []byte
+	if b.flusher.PrefixFunc != nil {
+		p = b.flusher.PrefixFunc(b.conn, messages)
+	}
+	if b.flusher.SuffixFunc != nil {
+		s = b.flusher.SuffixFunc(b.conn, messages)
+	}
+
 	w, err := b.conn.NextWriter(b.flusher.ctx, OpcodeBinary)
 	if err != nil {
 		return err
 	}
 
-	if _, err := w.Write(openBracket); err != nil {
-		w.Close()
-		return err
-	}
-
-	for i, msg := range messages {
-		if i != 0 {
-			if _, err := w.Write(comma); err != nil {
-				w.Close()
-				return err
-			}
-		}
-		if _, err := w.Write(msg); err != nil {
-			w.Close()
-			return err
-		}
-	}
-
-	if _, err := w.Write(closingBracket); err != nil {
+	err = encoder(w, messages, p, s)
+	if err != nil {
+		fmt.Println(err)
 		w.Close()
 		return err
 	}
@@ -160,28 +148,98 @@ func (b *messageBatch) sendJSONStrategy(messages [][]byte) error {
 	return w.Close()
 }
 
-// sendPrefixStrategy encodes messages with length prefixes and sends them via websocket binary message.
+// Pre-allocated byte slices for JSON array formatting to avoid allocations during batching.
+var (
+	openBracket    = []byte{'['}
+	closingBracket = []byte{']'}
+	comma          = []byte{','}
+)
+
+// jsonArrayEncoder encodes messages as a JSON array and sends them via websocket binary message.
 //
-// Each message is prefixed with its length as a 4-byte big-endian uint32, allowing clients
-// to parse individual messages from the batch: [len1][msg1][len2][msg2][len3][msg3]...
-func (b *messageBatch) sendPrefixStrategy(messages [][]byte) error {
-	w, err := b.conn.NextWriter(b.flusher.ctx, OpcodeBinary)
-	if err != nil {
+// The messages are written as: [message1,message2,message3,...]
+// Each message is assumed to be valid JSON and is written directly without re-encoding.
+func jsonArrayEncoder(w *ConnWriter, messages [][]byte, p []byte, s []byte) error {
+	// open the array
+	if _, err := w.Write(openBracket); err != nil {
 		return err
 	}
 
-	prefix := make([]byte, 4)
-	for _, msg := range messages {
-		prefix = prefix[:0]
-		if _, err := w.Write(binary.BigEndian.AppendUint32(prefix, uint32(len(msg)))); err != nil {
-			w.Close()
+	// write prefix
+	if p != nil {
+		if _, err := w.Write(p); err != nil {
 			return err
 		}
-		if _, err := w.Write(msg); err != nil {
-			w.Close()
+		if _, err := w.Write(comma); err != nil {
 			return err
 		}
 	}
 
-	return w.Close()
+	// write the batch
+	for i, msg := range messages {
+		if i != 0 {
+			if _, err := w.Write(comma); err != nil {
+				return err
+			}
+		}
+		if _, err := w.Write(msg); err != nil {
+			return err
+		}
+	}
+
+	// write suffix
+	if s != nil {
+		if _, err := w.Write(comma); err != nil {
+			return err
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
+	}
+
+	// close the array
+	_, err := w.Write(closingBracket)
+	return err
+}
+
+// lengthPrefixEncoder encodes messages with length prefixes and sends them via websocket binary message.
+//
+// Each message is prefixed with its length as a 4-byte big-endian uint32, allowing clients
+// to parse individual messages from the batch: [len1][msg1][len2][msg2][len3][msg3]...
+func lengthPrefixEncoder(w *ConnWriter, messages [][]byte, p []byte, s []byte) error {
+	// pre allocating a slice for the lengthPrefix to avoid allocating for every message
+	lengthPrefix := make([]byte, 0, 4)
+
+	// write prefix data
+	if p != nil {
+		if _, err := w.Write(binary.BigEndian.AppendUint32(lengthPrefix, uint32(len(p)))); err != nil {
+			return err
+		}
+		if _, err := w.Write(p); err != nil {
+			return err
+		}
+	}
+
+	// write messages
+	for _, msg := range messages {
+		lengthPrefix = lengthPrefix[:0]
+		if _, err := w.Write(binary.BigEndian.AppendUint32(lengthPrefix, uint32(len(msg)))); err != nil {
+			return err
+		}
+		if _, err := w.Write(msg); err != nil {
+			return err
+		}
+	}
+
+	// write suffix
+	if s != nil {
+		lengthPrefix = lengthPrefix[:0]
+		if _, err := w.Write(binary.BigEndian.AppendUint32(lengthPrefix, uint32(len(s)))); err != nil {
+			return err
+		}
+		_, err := w.Write(s)
+		return err
+	}
+
+	return nil
 }
