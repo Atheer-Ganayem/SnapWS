@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"slices"
 	"sync"
-	"unicode/utf8"
 )
 
 // Manager tracks active WebSocket connections in a thread-safe way.
@@ -165,24 +164,30 @@ func (m *Manager[KeyType]) broadcast(ctx context.Context, opcode uint8, data []b
 	return m.Upgrader.broadcast(ctx, conns, opcode, data)
 }
 
-// broadcast sends a message to all active connections except the connection of key "exclude".
+// broadcast sends a message of opcode text to all active connections except the connection of key "exclude".
 // It takes a context.Context, data as a slice of bytes,
-// and an optional "exclude" which are the keys of connections to exclude from the broadcast
-// data must be a valid UTF-8 string, otherwise an error will be returned.
+// and an optional "exclude" which are the keys of connections to exclude from the broadcast.
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) BroadcastString(ctx context.Context, data []byte, exclude ...KeyType) (int, error) {
-	if !m.Upgrader.SkipUTF8Validation && !utf8.Valid(data) {
-		return 0, ErrInvalidUTF8
-	}
 	return m.broadcast(ctx, OpcodeText, data, exclude...)
 }
 
-// broadcast sends a message to all active connections except the connection of key "exclude".
+// broadcast sends a message of opcode binary to all active connections except the connection of key "exclude".
 // It takes a context.Context, data as a slice of bytes,
 // and an optional "exclude" which are the keys of connections to exclude from the broadcast
 // It returns "n" the number of successfull writes, and an error.
 func (m *Manager[KeyType]) BroadcastBytes(ctx context.Context, data []byte, exclude ...KeyType) (int, error) {
 	return m.broadcast(ctx, OpcodeBinary, data, exclude...)
+}
+
+// This is a convenience method that marshals the given value into json and calls BroadcastString.
+func (m *Manager[KeyType]) BroadcastJSON(ctx context.Context, v interface{}, exclude ...KeyType) (int, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+
+	return m.BroadcastString(ctx, data, exclude...)
 }
 
 // Shut downs the manager:
