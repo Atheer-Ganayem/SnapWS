@@ -347,6 +347,16 @@ func (r *Room[keyType]) BroadcastBytes(ctx context.Context, data []byte, exclude
 	return r.broadcast(ctx, OpcodeBinary, data, exclude...)
 }
 
+// This is a convenience method that marshals the given value into json and calls BroadcastString.
+func (r *Room[keyType]) BroadcastJSON(ctx context.Context, v interface{}, exclude ...*Conn) (int, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+
+	return r.BroadcastString(ctx, data, exclude...)
+}
+
 // BatchBroadcast loops over the room's connections and adds the given data into their batch.
 //
 // Returns:
