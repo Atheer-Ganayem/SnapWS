@@ -31,6 +31,9 @@ func emptySendFunc(ctx context.Context, conn *Conn, messages [][]byte) error {
 	return nil
 }
 
+// PrefixSuffixFunc defines the signature of "PrefixFunc" and "SuffixFunc" fields for the Flusher.
+type PrefixSuffixFunc func(conn *Conn, messages [][]byte) []byte
+
 type batchFlusher struct {
 	strategy   BatchStrategy
 	flushEvery time.Duration
@@ -45,6 +48,15 @@ type batchFlusher struct {
 
 	conns map[*Conn]bool
 	mu    sync.RWMutex
+
+	// This is an optional function.
+	//
+	// The returned data will appended at the begining of the batch.
+	PrefixFunc PrefixSuffixFunc
+	// This is an optional function.
+	//
+	// The returned data will appended at the end of the batch.
+	SuffixFunc PrefixSuffixFunc
 }
 
 // newFlusher creates and initializes a new batchFlusher for the room with the specified configuration.
