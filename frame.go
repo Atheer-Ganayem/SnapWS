@@ -38,45 +38,59 @@ const (
 const MaxHeaderSize = 14
 const MaxControlFramePayload = 125
 
-// Write the frame header to a ConnWriter, must have at least 14 empty bytes at the begining.
+// writeHeaders method is a convenience method.
+//
+// It calls writeHeaders function with the correct arguments extracted from the ConnWriter.
 func (w *ConnWriter) writeHeaders(FIN bool, OPCODE uint8) error {
-	if w.start < 14 {
-		return ErrInsufficientHeaderSpace
+	newStart, err := writeHeaders(w.buf, w.start, w.used, FIN, OPCODE, !w.conn.isServer)
+	w.start = newStart
+	return err
+}
+
+// writeHeaders takes a slice of bytes that represnts a frame.
+//
+// The slice must have at least it's first 14 bytes empty (start >= 14), these 14 >= bytes will be used
+// to write the frame's header (fin, opcode, length, masking key, etc...).
+//
+// Returns an int representing the new start value, and an error.
+func writeHeaders(buf []byte, start, used int, FIN bool, OPCODE uint8, maskPayload bool) (int, error) {
+	if start < 14 {
+		return start, ErrInsufficientHeaderSpace
 	}
 
-	if !w.conn.isServer {
-		_, err := rand.Read(w.buf[w.start-4 : w.start])
+	if maskPayload {
+		_, err := rand.Read(buf[start-4 : start])
 		if err != nil {
-			return err
+			return start, err
 		}
-		mask(w.buf[w.start:w.used], w.buf[w.start-4:w.start], 0)
-		w.start -= 4
+		mask(buf[start:used], buf[start-4:start], 0)
+		start -= 4
 	}
 
-	payloadLength := w.used - w.start
+	payloadLength := used - start
 
 	if payloadLength < 0 {
-		return ErrInvalidPayloadLength
+		return start, ErrInvalidPayloadLength
 	} else if payloadLength < 126 {
-		w.buf[w.start-1] = byte(payloadLength)
-		w.start--
+		buf[start-1] = byte(payloadLength)
+		start--
 	} else if payloadLength <= math.MaxUint16 {
-		binary.BigEndian.PutUint16(w.buf[w.start-2:w.start], uint16(payloadLength))
-		w.buf[w.start-3] = 126
-		w.start -= 3
+		binary.BigEndian.PutUint16(buf[start-2:start], uint16(payloadLength))
+		buf[start-3] = 126
+		start -= 3
 	} else {
-		binary.BigEndian.PutUint64(w.buf[w.start-8:w.start], uint64(payloadLength))
-		w.buf[w.start-9] = 127
-		w.start -= 9
+		binary.BigEndian.PutUint64(buf[start-8:start], uint64(payloadLength))
+		buf[start-9] = 127
+		start -= 9
 	}
 
-	w.buf[w.start-1] = OPCODE
+	buf[start-1] = OPCODE
 	if FIN {
-		w.buf[w.start-1] |= 0x80
+		buf[start-1] |= 0x80
 	}
-	w.start--
+	start--
 
-	return nil
+	return start, nil
 }
 
 func isValidCloseCode(code uint16) bool {
