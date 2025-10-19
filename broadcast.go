@@ -3,6 +3,7 @@ package snapws
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 type message interface {
@@ -10,22 +11,44 @@ type message interface {
 }
 
 // normal message (not a batch)
-type singleMessage struct {
-	ctx    context.Context
-	opcode uint8
-	data   []byte
+// This is used for (u *Upgrader) broadcast(), to broadcast a single normal websocket message in one frame.
+// Implements the message interface
+type frame struct {
+	ctx context.Context
+	buf []byte
 }
 
-func (m *singleMessage) writeToConn(conn *Conn) error {
-	return conn.SendMessage(m.ctx, m.opcode, m.data)
+// Here we will send the frame directly (in one syscall) without copying to user buffer (without facing the possibility of fragmenting it).
+// This will save us syscalls and copies.
+func (m *frame) writeToConn(conn *Conn) error {
+	// Acquire write lock
+	if err := conn.writeLock.lockCtx(m.ctx); err != nil {
+		return err
+	}
+	defer conn.writeLock.unLock()
+
+	// set deadline
+	if err := conn.raw.SetWriteDeadline(time.Now().Add(conn.upgrader.WriteWait)); err != nil {
+		conn.CloseWithCode(CloseInternalServerErr, ErrInternalServer.Error())
+		return fatal(err)
+	}
+
+	// send frame
+	if err := conn.sendFrame(m.buf); err != nil {
+		return fatal(err)
+	}
+
+	return nil
 }
 
+// Implements the message interface.
+// It represents a single message (only payload) to-be batched by a Conn.
 type batchMessage struct {
-	data []byte
+	buf []byte
 }
 
 func (m *batchMessage) writeToConn(conn *Conn) error {
-	return conn.Batch(m.data)
+	return conn.Batch(m.buf)
 }
 
 // Listens for the connection's broadcastQueue channel and executes the writeToConn method of the inqueued message.
@@ -33,12 +56,17 @@ func (conn *Conn) broadcastListener() {
 	for {
 		select {
 		case <-conn.done:
+			// drain the channel (this will make the GC clean the channel faster)
+			for len(conn.broadcastQueue) > 0 {
+				<-conn.broadcastQueue
+			}
 			return
 		case m, ok := <-conn.broadcastQueue:
 			if !ok {
 				return
 			}
 			if err := m.writeToConn(conn); IsFatalErr(err) {
+				fmt.Println(err)
 				return
 			}
 		}
@@ -61,7 +89,13 @@ func (u *Upgrader) broadcast(ctx context.Context, conns []*Conn, opcode uint8, d
 		ctx = context.Background()
 	}
 
-	m := &singleMessage{ctx: ctx, opcode: opcode, data: data}
+	m := &frame{ctx: ctx, buf: make([]byte, len(data)+MaxHeaderSize)}
+	start, err := writeHeaders(m.buf, 14, len(m.buf), true, opcode, false)
+	if err != nil {
+		return n, err
+	}
+	copy(m.buf[14:], data)
+	m.buf = m.buf[start:]
 
 	for _, conn := range conns {
 		select {
@@ -108,7 +142,7 @@ func (u *Upgrader) batchBroadcast(ctx context.Context, conns []*Conn, data []byt
 		return 0, ErrBatchingUninitialized
 	}
 
-	m := &batchMessage{data: data}
+	m := &batchMessage{buf: data}
 
 	for _, conn := range conns {
 		select {
