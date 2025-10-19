@@ -85,6 +85,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error
 			if err := middleware(w, r); err != nil {
 				if mwErr, ok := AsMiddlewareErr(err); ok {
 					http.Error(w, mwErr.Message, mwErr.Code)
+					return nil, err
 				}
 				http.Error(w, "middleware error", http.StatusBadRequest)
 				return nil, err
