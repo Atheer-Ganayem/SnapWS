@@ -5,12 +5,12 @@
 
 **SnapWS is a minimal WebSocket library for Go.**
 
-It takes care of ping/pong, close frames, connection safety, rate limiting, and lifecycle management so you can just connect, read, and write — without boilerplate or extra complexity.
+It takes care of ping/pong, close frames, connection safety, rate limiting, room management and many other things. so you can just connect, read, and write — without boilerplate or extra complexity.
 
 > 🧠 **Why?**  
-> Using [gorilla/websocket](https://github.com/gorilla/websocket) often felt like overkill. You had to write a lot of code, worry about race conditions, manually handle timeouts, and understand the WebSocket protocol more deeply than necessary.
+> Tired of using [gorilla/websocket](https://github.com/gorilla/websocket) and handling ping/pong, rate, limiting, rooms, thread-safety, broadcasting, and many other things by yourself? SnapWS will take care of all of that and let you focus on your app logic.
 >
-> `snapws` handles the boring stuff for you — so you can **just send and receive messages**.
+> `snapws` handles the boring stuff for you.
 
 ---
 
@@ -19,12 +19,12 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 - ✅ Minimal and easy to use API.
 - ✅ Fully passes the [autobahn-testsuite](https://github.com/crossbario/autobahn-testsuite) (not including PMCE)
 - ✅ Automatic handling of ping/pong and close frames.
-- ✅ Connection manager (useful when communicating between different clients like chat apps).
-- ✅ Room manager.
-- ✅ Rate limiter.
-- ✅ Message batching. ([for more info](https://github.com/Atheer-Ganayem/SnapWS/releases/tag/v1.1.0))
-- ✅ Written completely in standard library amd Go offical libraries, no external libraries imported.
-- ✅ Support for middlewares and connect/disconnect hooks.
+- **✅ Connection manager (useful when communicating between different clients like chat apps).**
+- **✅ Room manager.**
+- **✅ Rate limiter.**
+- **✅ Message batching. ([for more info](https://github.com/Atheer-Ganayem/SnapWS/releases/tag/v1.1.0))**
+- **✅ Written completely in standard library amd Go offical libraries, no external libraries imported.**
+- **✅ Support for middlewares and connect/disconnect hooks.**
 
 ---
 
@@ -40,6 +40,7 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 - [Room based chat](./cmd/examples/room-chat/main.go)
 - [Direct messages (1:1 chat)](./cmd/examples/direct-messages/main.go)
 - [File streaming](./cmd/examples/file-streaming/main.go)
+- [Message batching](./cmd/examples/batching/main.go)
 
 ## 🚀 Getting Started
 
@@ -49,7 +50,8 @@ It takes care of ping/pong, close frames, connection safety, rate limiting, and 
 go get github.com/Atheer-Ganayem/SnapWS
 ```
 
-### Basic echo example
+### Basic room-based chat server example
+> This is a dummy example. For real world usage you would need at least validation and probably authentication.
 
 ```go
 package main
@@ -62,26 +64,30 @@ import (
 	snapws "github.com/Atheer-Ganayem/SnapWS"
 )
 
-var upgrader *snapws.Upgrader
+var roomManager *snapws.RoomManager[string]
 
 func main() {
-	upgrader = snapws.NewUpgrader(nil)
+	roomManager = snapws.NewRoomManager[string](nil)
+	defer roomManager.Shutdown()
 
-	http.HandleFunc("/echo", handler)
+	http.HandleFunc("/", handler)
 
 	fmt.Println("Server listening on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r)
+	roomQuery := r.URL.Query().Get("room")
+	name := r.URL.Query().Get("name")
+
+	conn, room, err := roomManager.Connect(w, r, roomQuery, name)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
 	for {
-		data, err := conn.ReadString()
+		msg, err := conn.ReadString()
 		if snapws.IsFatalErr(err) {
 			return // Connection closed
 		} else if err != nil {
@@ -89,12 +95,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		err = conn.SendString(context.TODO(), data)
-		if snapws.IsFatalErr(err) {
-			return // Connection closed
-		} else if err != nil {
-			fmt.Println("Non-fatal error:", err)
-			continue
+		_, err = room.BroadcastString(context.TODO(), msg)
+		if err != nil {
+			fmt.Println("broadcasting error:", err)
 		}
 	}
 }
