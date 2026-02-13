@@ -1,30 +1,38 @@
-# snapws
+# SnapWS
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Atheer-Ganayem/SnapWS.svg)](https://pkg.go.dev/github.com/Atheer-Ganayem/SnapWS)
 ![License](https://img.shields.io/github/license/Atheer-Ganayem/SnapWS)
 
-**SnapWS is a minimal WebSocket library for Go.**
+**Production-ready WebSockets, minus the boilerplate.**
 
-It takes care of ping/pong, close frames, connection safety, rate limiting, room management and many other things. so you can just connect, read, and write — without boilerplate or extra complexity.
+SnapWS is a zero-dependency, thread-safe WebSocket library for Go. It abstracts away the complexity of connection management, rooms, and protocol compliance so you can focus purely on your application logic.
 
-> 🧠 **Why?**  
-> Tired of using [gorilla/websocket](https://github.com/gorilla/websocket) and handling ping/pong, rate, limiting, rooms, thread-safety, broadcasting, and many other things by yourself? SnapWS will take care of all of that and let you focus on your app logic.
->
-> `snapws` handles the boring stuff for you.
+---
+
+## ⚡️ Why SnapWS?
+
+Most Go WebSocket implementations force you to manually handle the "boring stuff": Ping/Pong, thread-safety locks, broadcasting logic, and connection state management. 
+
+**SnapWS handles it all for you.**
+
+* **Zero Dependencies:** Written entirely with the Go standard library. No bloat.
+* **Developer Experience:** Intuitive API for Rooms and Direct Messaging out of the box.
+* **Safety First:** Concurrent and thread-safe design.
+* **Standards Compliant:** Passes the [Autobahn Testsuite](https://github.com/crossbario/autobahn-testsuite).
 
 ---
 
 ## ✨ Features
 
-- ✅ Minimal and easy to use API.
-- ✅ Fully passes the [autobahn-testsuite](https://github.com/crossbario/autobahn-testsuite) (not including PMCE)
-- ✅ Automatic handling of ping/pong and close frames.
-- **✅ Connection manager (useful when communicating between different clients like chat apps).**
-- **✅ Room manager.**
-- **✅ Rate limiter.**
-- **✅ Message batching. ([for more info](https://github.com/Atheer-Ganayem/SnapWS/releases/tag/v1.1.0))**
-- **✅ Written completely in standard library amd Go offical libraries, no external libraries imported.**
-- **✅ Support for middlewares and connect/disconnect hooks.**
+| Feature | Description |
+| :--- | :--- |
+|  **Room Management** | Built-in support for joining, leaving, and broadcasting to rooms. |
+|  **Connection Manager** | Easily handle 1:1 communication and direct messages between clients. |
+|  **Rate Limiter** | Protect your server from flood attacks with configurable limits. |
+|  **Message Batching** | Optional batching to reduce syscall overhead under load. ([for more info](https://github.com/Atheer-Ganayem/SnapWS/releases/tag/v1.1.0)) |
+|  **Auto-KeepAlive** | Automatic handling of Ping/Pong and Close frames. |
+|  **Middleware Support** | Hooks for Connect/Disconnect events to integrate custom logic. |
+|  **Generics** | Type-safe implementation using Go 1.18+ generics. |
 
 ---
 
